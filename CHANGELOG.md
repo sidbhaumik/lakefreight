@@ -4,12 +4,15 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-25
+
 ### Added
 
 - `infra/terraform`: Terraform/OpenTofu that deploys the pipeline. On AWS: encrypted, versioned egress buckets with a key per zone, the roles Snowflake uses to write each zone, Secrets Manager for the service user's key, the four Lambda functions, the Step Functions state machine, and optional cross-account replication. On Snowflake: lane warehouses, zone roles, storage integrations, stages, grants and a key-pair service user. Its tests plan the module with mocked Snowflake and check the access policies.
 - `infra/build_lambda.sh` builds the Lambda package from Linux wheels.
 - Lambda functions read their settings from `LAKEFREIGHT_CONFIG_TOML` and Snowflake credentials from Secrets Manager (`SNOWFLAKE_SECRET_ARN`).
 - Zones accept a `kms_key_id`; manifests and schema files are encrypted with the zone's key.
+- `lakefreight discover --table` writes the discovered metadata to a Snowflake table, which `sql/ddl/02_seed_config.sql` now reads directly.
 
 ### Changed
 
@@ -57,7 +60,8 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sidbhaumik/lakefreight/releases/tag/v0.1.0
