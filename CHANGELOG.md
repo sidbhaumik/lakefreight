@@ -4,6 +4,10 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-25
+
+First release published to PyPI.
+
 ### Added
 
 - `lakefreight register`: registers a table's unloaded Parquet files as a Delta Lake or Apache Iceberg table without rewriting them. Only files named in a committed manifest are included, and the newest manifest per chunk wins. Refuses incomplete tables, files with the wrong size, schema drift between chunks, and nanosecond timestamps.
@@ -34,5 +38,6 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sidbhaumik/lakefreight/releases/tag/v0.1.0
