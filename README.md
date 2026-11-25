@@ -29,6 +29,7 @@ It is built for the hard version of the job: thousands of tables, petabytes of d
 
 ![lakefreight architecture: metadata drives a chunk planner and work items; Snowflake unloads Parquet into sensitivity zones; reconciled chunks get a manifest, are replicated to the target account, and are registered as Delta Lake or Iceberg tables](https://raw.githubusercontent.com/sidbhaumik/lakefreight/main/docs/architecture.svg)
 
+- **Discovers your tables.** `lakefreight discover` reads sizes, columns and types from Snowflake, and flags personal data using Snowflake's own sensitive data classification plus any tags or column-name rules you add. Columns Snowflake has never classified are treated as sensitive.
 - **Generates extract SQL from metadata.** One `COPY INTO` per table, or per date chunk for large tables. Nothing is hand-written.
 - **Routes by sensitivity.** Three zones, each with its own stage, bucket location, key and role:
   - `RESTRICTED`: tables with tokenized identifiers, such as government ID numbers, that must leave in clear form
@@ -58,11 +59,38 @@ pip install "lakefreight[delta]"
 pip install "lakefreight[iceberg]"
 ```
 
+To read metadata straight from Snowflake, add the connector:
+
+```bash
+pip install "lakefreight[snowflake]"
+```
+
 Then create a settings file to edit, and run `lakefreight --help` for the commands:
 
 ```bash
 lakefreight config --write
 ```
+
+## Typical workflow
+
+1. **Discover** the tables and their sensitivity. This uses a connection from `~/.snowflake/connections.toml`; add `--sql-only` to get the query and run it yourself instead.
+
+   ```bash
+   lakefreight discover --database SALES --database HR --out metadata.csv
+   ```
+
+2. **Plan** the work: one `COPY INTO` per table or date chunk, routed by zone.
+
+   ```bash
+   lakefreight plan --metadata metadata.csv --out generated
+   ```
+
+3. **Unload** with the generated SQL, or at scale with the Step Functions pipeline.
+4. **Register** each table as Delta Lake or Iceberg once its chunks have landed.
+
+   ```bash
+   lakefreight register --format delta --table-root s3://my-egress/internal/SALES/PUBLIC/ORDERS
+   ```
 
 ## Try it in two minutes
 
@@ -120,6 +148,7 @@ The repo includes a [Claude Code skill](https://github.com/sidbhaumik/lakefreigh
 | Path | Purpose |
 |---|---|
 | `src/lakefreight/cli.py` | The `lakefreight` command |
+| `src/lakefreight/discover.py` | `lakefreight discover`: the metadata CSV from Snowflake's metadata and classification |
 | `src/lakefreight/generate.py` | `lakefreight plan`: metadata CSV in, SQL files out |
 | `src/lakefreight/chunk_planner.py` | Packs months into chunks with gap-free predicates |
 | `src/lakefreight/renderer.py` | Renders the unload, source-count and unmatched-token SQL |

@@ -43,3 +43,30 @@ max_concurrency = 32
 [lanes.RESTRICTED]
 warehouse = "MIG_RESTRICTED_WH"
 max_concurrency = 4
+
+# How `lakefreight discover` builds the metadata CSV from Snowflake.
+[discover]
+# "account_usage": one query across databases; needs access to the SNOWFLAKE
+#   database and lags changes by up to a few hours.
+# "information_schema": current state, per database; tags still come from
+#   ACCOUNT_USAGE when any tag rule below is in use.
+source = "account_usage"
+exclude_schemas = ["INFORMATION_SCHEMA"]
+
+# Use Snowflake's sensitive data classification. A column tagged with
+# SNOWFLAKE.CORE.PRIVACY_CATEGORY is personal data. In a table Snowflake has
+# classified, any other column is not. In a table it has not classified, the
+# column's status is unknown, and lakefreight treats it as personal data.
+use_snowflake_classification = true
+
+# More rules. A tag is "DATABASE.SCHEMA.TAG" or "DATABASE.SCHEMA.TAG=VALUE".
+# Column patterns are case-insensitive regular expressions on column names.
+pii_tags = []
+pii_column_patterns = []
+# Restricted columns hold tokens that are swapped for clear values on extract.
+restricted_tags = []
+restricted_column_patterns = []
+
+# Only for estates you know hold no personal data: report unclassified columns
+# as not personal data, so their tables go to the INTERNAL zone.
+treat_unclassified_as_non_pii = false

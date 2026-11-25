@@ -34,10 +34,14 @@ dev = [
     "pyarrow>=14",
     "deltalake>=1.0",
     "pyiceberg[sql-sqlite]>=0.9",
+    "duckdb>=1.0",
+    "sqlglot>=25",
 ]
 # Register unloaded files as open table formats (lakefreight register).
 delta = ["pyarrow>=14", "deltalake>=1.0"]
 iceberg = ["pyarrow>=14", "pyiceberg>=0.9"]
+# Connect to Snowflake (lakefreight discover).
+snowflake = ["snowflake-connector-python>=3.12"]
 # Needed only to run against Snowflake and AWS (planning.py, handlers.py).
 pipeline = ["snowflake-connector-python>=3.12", "boto3>=1.34"]
 

@@ -3,6 +3,7 @@
 lakefreight plan --metadata tables.csv [--profiles months.csv] [--out generated]
 lakefreight register --format delta|iceberg --table-root s3://bucket/zone/DB/SCHEMA/TABLE
 lakefreight config [--write lakefreight.toml]
+lakefreight discover --database DB [--out metadata.csv] [--sql-only]
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from . import generate, register
+from . import discover, generate, register
 from .config import LOCAL_NAME, config_source, default_config_text
 
 
@@ -43,6 +44,10 @@ def config_command(argv: list[str], prog: str | None = None) -> int:
 
 
 COMMANDS = {
+    "discover": (
+        discover.main,
+        "Build the metadata CSV from Snowflake's metadata and classification",
+    ),
     "plan": (generate.main, "Generate extract SQL and a work-item list from a metadata CSV"),
     "register": (register.main, "Register unloaded Parquet files as a Delta or Iceberg table"),
     "config": (config_command, "Show the settings in use, or write a copy to edit"),

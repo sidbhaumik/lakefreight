@@ -63,13 +63,17 @@ def config_source(path: str | Path | None = None) -> Path | None:
     return None
 
 
-def load_settings(path: str | Path | None = None) -> Settings:
+def load_raw(path: str | Path | None = None) -> dict:
+    """The settings as parsed TOML, from the first source that exists."""
     source = config_source(path)
     if source is None:
-        raw = tomllib.loads(default_config_text())
-    else:
-        with open(source, "rb") as f:
-            raw = tomllib.load(f)
+        return tomllib.loads(default_config_text())
+    with open(source, "rb") as f:
+        return tomllib.load(f)
+
+
+def load_settings(path: str | Path | None = None) -> Settings:
+    raw = load_raw(path)
     ex, xref = raw["extract"], raw["xref"]
     return Settings(
         control_schema=ex["control_schema"],

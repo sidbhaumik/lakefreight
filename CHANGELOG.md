@@ -4,6 +4,12 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+### Added
+
+- `lakefreight discover`: builds the metadata CSV from Snowflake's `ACCOUNT_USAGE` or `INFORMATION_SCHEMA` views. Personal-data flags come from Snowflake's sensitive data classification, your own tags and column-name patterns; restricted flags from your tags and patterns. Columns in tables Snowflake has never classified are left unknown, so their tables go to the PII zone. `--sql-only` prints the query to run yourself.
+- `snowflake` install extra for the Snowflake connector.
+- `[discover]` section in the settings.
+
 ## [0.2.0] - 2026-11-25
 
 First release published to PyPI.

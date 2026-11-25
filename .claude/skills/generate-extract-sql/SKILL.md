@@ -27,7 +27,7 @@ The generator reads a CSV with one row per column and these headers (case-insens
 
 If the user's file uses other header names or units, write a normalized copy (a short script is fine) and leave their original untouched. Convert sizes to bytes. Datatypes that contain commas, such as `NUMBER(38,0)`, must be quoted in the CSV.
 
-If there is no file yet, give the user a query against their metadata table that produces these columns, and ask them to export the result.
+If there is no file yet, use `lakefreight discover --database <DB> --out metadata.csv`, which builds it from Snowflake's metadata views and sensitive data classification. If you can't connect, `lakefreight discover --database <DB> --sql-only` prints the query for the user to run and export. Report how many tables discovery left with unknown personal-data flags: those go to the PII zone until they're classified or covered by a `[discover]` rule.
 
 See `examples/metadata_sample.csv` for a working example.
 

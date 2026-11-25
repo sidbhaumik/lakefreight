@@ -23,7 +23,7 @@ The examples use an illustrative migration: 3,000 tables, 2 PB, 10 weeks, with s
 
 You need:
 
-- **A metadata table** with one row per column: database, schema, table, size, column name, datatype, and sensitivity flags (personal data, restricted data) at table and column level. Snowflake's `INFORMATION_SCHEMA` gives you everything except the sensitivity flags.
+- **Metadata** with one row per column: database, schema, table, size, column name, datatype, and sensitivity flags (personal data, restricted data) at table and column level. `lakefreight discover` builds this from Snowflake; see step 3.
 - **Answers to five questions.** They change the design more than anything else.
 
 | Question | Why it matters |
@@ -61,7 +61,27 @@ Snowflake reports compressed size. Parquet output is often larger, so plan trans
 
 ## 3. Profile the metadata
 
-Run `sql/ddl/01_control_tables.sql`, adapt and run `sql/ddl/02_seed_config.sql`, then answer these from the control tables:
+Start by building the metadata file:
+
+```bash
+lakefreight discover --database SALES --database HR --out metadata.csv
+```
+
+It reads tables, sizes, columns and types from `SNOWFLAKE.ACCOUNT_USAGE` (set `source = "information_schema"` under `[discover]` if you can't read that database). Sensitivity flags come from three places:
+
+| Source | Sets | Configure with |
+|---|---|---|
+| Snowflake's sensitive data classification | Personal data: any column tagged `SNOWFLAKE.CORE.PRIVACY_CATEGORY` | On by default: `use_snowflake_classification` |
+| Your own tags | Personal or restricted data | `pii_tags`, `restricted_tags`, as `DB.SCHEMA.TAG` or `DB.SCHEMA.TAG=VALUE` |
+| Column-name patterns | Personal or restricted data | `pii_column_patterns`, `restricted_column_patterns` |
+
+A column in a table Snowflake has classified, with no matching tag or pattern, is marked not personal. A column in a table that has never been classified is left unknown, and its table goes to the PII zone. Classify those tables in Snowflake, or add rules, until the zones look right. Only set `treat_unclassified_as_non_pii` if you know the estate holds no personal data.
+
+Restricted flags come only from your tags and patterns, because only you know which columns hold tokens to swap for clear values.
+
+`ACCOUNT_USAGE` lags changes by up to a few hours, and reading it needs access to the `SNOWFLAKE` database. Run `lakefreight discover --sql-only` to get the query and run it yourself, then export the result as CSV.
+
+To track the plan in Snowflake as well, run `sql/ddl/01_control_tables.sql`, adapt and run `sql/ddl/02_seed_config.sql`. Then answer these:
 
 - How is volume distributed? Usually a small number of tables holds most of the bytes. Those are your schedule.
 - How many tables fall in each zone, and how many have missing flags?

@@ -94,7 +94,7 @@ def submit(event, _context=None):
         ATTEMPTS=int(item["ATTEMPTS"] or 0) + 1,
         LAST_ERROR=None,
     )
-    # The connection is deliberately not closed: see README, "Verify in the pilot".
+    # The connection is deliberately not closed: see "Known gaps" in docs/design-decisions.md.
     return {
         "work_item_id": work_item_id,
         "query_id": query_id,
