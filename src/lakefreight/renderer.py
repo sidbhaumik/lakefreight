@@ -17,7 +17,7 @@ from .config import Settings
 from .models import ColumnSpec, TableSpec, quote_ident
 
 _env = Environment(
-    loader=PackageLoader("migrator", "templates"),
+    loader=PackageLoader("lakefreight", "templates"),
     undefined=StrictUndefined,
     keep_trailing_newline=False,
 )

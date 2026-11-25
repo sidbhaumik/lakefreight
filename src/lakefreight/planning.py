@@ -2,7 +2,7 @@
 
 Run once after seeding (and again after fixing chunk columns):
 
-    PLANNER_ROLE=... PLANNER_WAREHOUSE=... python -m migrator.planning
+    PLANNER_ROLE=... PLANNER_WAREHOUSE=... python -m lakefreight.planning
 """
 
 from __future__ import annotations

@@ -38,10 +38,10 @@ See `examples/metadata_sample.csv` for a working example.
 ### 3. Run the generator
 
 ```bash
-python -m migrator.generate --metadata <metadata.csv> --out generated
+lakefreight plan --metadata <metadata.csv> --out generated
 ```
 
-Run it from the repo root with the package installed (`pip install -e .`) or with `PYTHONPATH=src`. Add `--profiles <profiles.csv>` when month profiles exist (step 4).
+Run it from the repo root after `pip install -e .`, which installs the `lakefreight` command. Without installing, use `PYTHONPATH=src python -m lakefreight plan ...`. Add `--profiles <profiles.csv>` when month profiles exist (step 4).
 
 It writes `generated/<ZONE>/<db>.<schema>.<table>/<chunk>.sql` and `generated/work_items.csv`. Each `.sql` file contains the unload, the source row count, and for restricted tables the unmatched-token count.
 
@@ -82,4 +82,4 @@ Knowing these lets you explain the output and spot input problems.
 
 ## What this skill does not do
 
-It does not connect to Snowflake or run the SQL. To execute at scale, the repo's Step Functions pipeline (`stepfunctions/` and `src/migrator/handlers.py`) renders the same SQL at run time from control tables. For the full migration method, see `docs/migration-guide.md`.
+It does not connect to Snowflake or run the SQL. To execute at scale, the repo's Step Functions pipeline (`stepfunctions/` and `src/lakefreight/handlers.py`) renders the same SQL at run time from control tables. For the full migration method, see `docs/migration-guide.md`.

@@ -1,9 +1,25 @@
 [project]
-name = "snowflake-s3-migration"
+name = "lakefreight"
 version = "0.1.0"
-description = "Metadata-driven Snowflake to S3 Parquet migration"
+description = "Bulk-move warehouse tables into open lakehouse files on cloud storage, for any engine to read"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["jinja2>=3.1"]
+keywords = ["snowflake", "s3", "parquet", "data-migration", "lakehouse", "databricks", "redshift", "bigquery"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Database",
+]
+
+[project.urls]
+Homepage = "https://github.com/sidbhaumik/lakefreight"
+Documentation = "https://github.com/sidbhaumik/lakefreight/tree/main/docs"
+Issues = "https://github.com/sidbhaumik/lakefreight/issues"
+
+[project.scripts]
+lakefreight = "lakefreight.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
@@ -18,7 +34,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-migrator = ["templates/*.j2"]
+lakefreight = ["templates/*.j2"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

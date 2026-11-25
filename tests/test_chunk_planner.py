@@ -1,6 +1,6 @@
 from datetime import date
 
-from migrator.chunk_planner import NULL_CHUNK_ID, oversized, plan_chunks
+from lakefreight.chunk_planner import NULL_CHUNK_ID, oversized, plan_chunks
 
 GB = 1024**3
 

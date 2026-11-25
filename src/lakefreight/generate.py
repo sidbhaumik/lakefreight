@@ -1,6 +1,6 @@
 """Generate extract SQL offline from a metadata CSV. No Snowflake access needed.
 
-    python -m migrator.generate --metadata examples/metadata_sample.csv \
+    lakefreight plan --metadata examples/metadata_sample.csv \
         --profiles examples/profiles_sample.csv --out generated
 
 Writes one .sql file per work item under <out>/<ZONE>/<db>.<schema>.<table>/
@@ -230,8 +230,8 @@ def generate(
     return summary
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+def main(argv: list[str] | None = None, prog: str | None = None) -> int:
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__.splitlines()[0])
     parser.add_argument("--metadata", required=True, help="metadata CSV, one row per column")
     parser.add_argument("--profiles", help="month profile CSV for large tables")
     parser.add_argument("--out", default="generated", help="output directory")

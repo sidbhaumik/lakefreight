@@ -1,10 +1,22 @@
-# Snowflake to S3 migration toolkit
+# lakefreight
 
-A metadata-driven toolkit for moving thousands of Snowflake tables to S3 as Parquet, with sensitive data kept in separate zones and every extract reconciled before it leaves.
+**Bulk-move warehouse tables into open lakehouse files on cloud storage, so any engine can read them.**
 
-It is built for migrations with thousands of tables, petabytes of data, many years of history, a fixed deadline, and a hand-off to an S3 bucket owned by another AWS account in another region. The method scales down to much smaller migrations.
+lakefreight unloads thousands of tables from a source warehouse into Parquet files on object storage, in a layout that Databricks, Snowflake, Redshift and BigQuery can all load or query. It plans the work from your metadata, keeps sensitive data in separate zones, and reconciles every extract before it is released.
 
-**Status:** the SQL generation, chunk planning, zone routing and reconciliation rules are unit tested. The Snowflake and AWS parts (control-table DDL, Lambda handlers, state machine) have not been run against live services.
+It is built for the hard version of the job: thousands of tables, petabytes of data, many years of history, a fixed deadline, and a hand-off to storage owned by another cloud account in another region. The same method works for much smaller moves.
+
+## Support matrix
+
+| | Supported today | On the roadmap |
+|---|---|---|
+| **Source** | Snowflake | Other warehouses |
+| **Target storage** | Amazon S3 | Google Cloud Storage, Azure Data Lake Storage |
+| **File format** | Parquet, with a manifest and schema sidecar per table | Delta Lake and Apache Iceberg metadata over the same Parquet files |
+| **Readers** | Any engine that reads Parquet: Databricks, Snowflake, Redshift, BigQuery | Native table registration in each |
+| **Orchestration** | AWS Step Functions | |
+
+**Status:** alpha. SQL generation, chunk planning, zone routing and reconciliation rules are unit tested. The Snowflake and AWS execution path (control-table DDL, Lambda handlers, state machine) has not yet been run against live services.
 
 ## What it does
 
@@ -40,15 +52,15 @@ flowchart LR
 No Snowflake or AWS account needed. This generates extract SQL for five sample tables from a fictional travel company:
 
 ```bash
-git clone https://github.com/sidbhaumik/snowflake-s3-migration.git
+git clone https://github.com/sidbhaumik/lakefreight.git
 ```
 
 ```bash
-cd snowflake-s3-migration && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+cd lakefreight && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```
 
 ```bash
-.venv/bin/python -m migrator.generate --metadata examples/metadata_sample.csv --profiles examples/profiles_sample.csv --out generated
+.venv/bin/lakefreight plan --metadata examples/metadata_sample.csv --profiles examples/profiles_sample.csv --out generated
 ```
 
 Output:
@@ -84,13 +96,14 @@ The repo includes a [Claude Code skill](.claude/skills/generate-extract-sql/SKIL
 
 | Path | Purpose |
 |---|---|
-| `src/migrator/generate.py` | Offline generator: metadata CSV in, SQL files out |
-| `src/migrator/chunk_planner.py` | Packs months into chunks with gap-free predicates |
-| `src/migrator/renderer.py` | Renders the unload, source-count and unmatched-token SQL |
-| `src/migrator/templates/copy_unload.sql.j2` | The `COPY INTO` template |
-| `src/migrator/reconcile.py` | Pass/fail rules, manifest and schema sidecar |
-| `src/migrator/planning.py` | Creates work items in Snowflake from the control tables |
-| `src/migrator/handlers.py` | Lambda handlers: list, submit, poll, reconcile |
+| `src/lakefreight/cli.py` | The `lakefreight` command |
+| `src/lakefreight/generate.py` | `lakefreight plan`: metadata CSV in, SQL files out |
+| `src/lakefreight/chunk_planner.py` | Packs months into chunks with gap-free predicates |
+| `src/lakefreight/renderer.py` | Renders the unload, source-count and unmatched-token SQL |
+| `src/lakefreight/templates/copy_unload.sql.j2` | The `COPY INTO` template |
+| `src/lakefreight/reconcile.py` | Pass/fail rules, manifest and schema sidecar |
+| `src/lakefreight/planning.py` | Creates work items in Snowflake from the control tables |
+| `src/lakefreight/handlers.py` | Lambda handlers: list, submit, poll, reconcile |
 | `stepfunctions/extract_lane.asl.json` | State machine, one execution per lane |
 | `sql/ddl/` | Control tables and the script that seeds them from metadata |
 | `config/defaults.toml` | Thresholds, zones, lanes, xref names |

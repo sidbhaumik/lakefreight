@@ -1,8 +1,8 @@
 import csv
 from pathlib import Path
 
-from migrator import generate
-from migrator.config import load_settings
+from lakefreight import generate
+from lakefreight.config import load_settings
 
 ROOT = Path(__file__).resolve().parents[1]
 METADATA = ROOT / "examples" / "metadata_sample.csv"

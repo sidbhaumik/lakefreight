@@ -5,7 +5,7 @@
     poll        check the COPY's status
     reconcile   compare counts, write the manifest, mark the item
 
-Environment: MIGRATOR_CONFIG (optional), ITEMS_BUCKET, plus the Snowflake
+Environment: LAKEFREIGHT_CONFIG (optional), ITEMS_BUCKET, plus the Snowflake
 variables in store.connect.
 """
 

@@ -95,7 +95,7 @@ Small tables are unloaded in one statement. Large tables are split by date so th
 3. **Profile each large table** with one query: row count by month.
 4. **Pack months into chunks** of roughly equal size. Fixed monthly or yearly chunks give uneven sizes when volume grew over the years.
 
-The planner in `src/migrator/chunk_planner.py` does step 4 and writes predicates that cannot miss a row:
+The planner in `src/lakefreight/chunk_planner.py` does step 4 and writes predicates that cannot miss a row:
 
 | Chunk | Predicate |
 |---|---|
@@ -109,7 +109,7 @@ For a large table with no usable date column, unload it in a single pass.
 To generate the SQL without connecting to anything:
 
 ```bash
-python -m migrator.generate --metadata my_metadata.csv --profiles my_profiles.csv --out generated
+lakefreight plan --metadata my_metadata.csv --profiles my_profiles.csv --out generated
 ```
 
 **Check:** for every chunked table, the chunk row estimates sum to the table's row count.
@@ -146,7 +146,7 @@ Measure and record:
 
 ## 8. Run the bulk extraction
 
-Create work items (`python -m migrator.planning`), then run one state-machine execution per lane.
+Create work items (`python -m lakefreight.planning`), then run one state-machine execution per lane.
 
 | Lane | Tables | Why separate |
 |---|---|---|

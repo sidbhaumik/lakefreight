@@ -1,9 +1,9 @@
 import pytest
 
-from migrator import renderer
-from migrator.config import load_settings
-from migrator.models import ColumnSpec, TableSpec, resolve_zone
-from migrator.reconcile import evaluate
+from lakefreight import renderer
+from lakefreight.config import load_settings
+from lakefreight.models import ColumnSpec, TableSpec, resolve_zone
+from lakefreight.reconcile import evaluate
 
 settings = load_settings()
 

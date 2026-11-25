@@ -39,7 +39,7 @@ class Settings:
 
 
 def load_settings(path: str | Path | None = None) -> Settings:
-    path = Path(path or os.environ.get("MIGRATOR_CONFIG") or DEFAULT_PATH)
+    path = Path(path or os.environ.get("LAKEFREIGHT_CONFIG") or DEFAULT_PATH)
     with open(path, "rb") as f:
         raw = tomllib.load(f)
     ex, xref = raw["extract"], raw["xref"]
