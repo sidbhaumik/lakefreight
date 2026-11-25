@@ -1,5 +1,5 @@
 {
-  "Comment": "Extract one lane. Input: {\"lane\": \"LARGE\" | \"SMALL\" | \"RESTRICTED\"}. Replace the ${...Arn} placeholders at deploy time.",
+  "Comment": "Extract one lane. Input: {\"lane\": \"LARGE\" | \"SMALL\" | \"RESTRICTED\"}. The function ARN placeholders are filled in at deploy time by infra/terraform.",
   "StartAt": "ListItems",
   "States": {
     "ListItems": {

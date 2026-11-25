@@ -2,27 +2,54 @@
 
 from __future__ import annotations
 
+import json
 import os
+import tempfile
 
 from .config import Settings
 from .models import ColumnSpec, TableSpec
 
+_KEY_FILE: str | None = None
+
+
+def credentials() -> dict:
+    """Account, user and private-key file for key-pair authentication.
+
+    With SNOWFLAKE_SECRET_ARN set (the deployed Lambda functions), they come from
+    a Secrets Manager secret holding JSON: {"account", "user", "private_key"},
+    where private_key is the PEM text. The key is written once to a private
+    temporary file. Otherwise they come from SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER
+    and SNOWFLAKE_PRIVATE_KEY_FILE.
+    """
+    global _KEY_FILE
+    arn = os.environ.get("SNOWFLAKE_SECRET_ARN")
+    if not arn:
+        return {
+            "account": os.environ["SNOWFLAKE_ACCOUNT"],
+            "user": os.environ["SNOWFLAKE_USER"],
+            "private_key_file": os.environ["SNOWFLAKE_PRIVATE_KEY_FILE"],
+        }
+    import boto3
+
+    secret = json.loads(
+        boto3.client("secretsmanager").get_secret_value(SecretId=arn)["SecretString"]
+    )
+    missing = {"account", "user", "private_key"} - secret.keys()
+    if missing:
+        raise KeyError(f"Snowflake secret is missing {sorted(missing)}")
+    if _KEY_FILE is None or not os.path.exists(_KEY_FILE):
+        fd, path = tempfile.mkstemp(prefix="lakefreight-", suffix=".p8")  # mode 0600
+        with os.fdopen(fd, "w") as f:
+            f.write(secret["private_key"])
+        _KEY_FILE = path
+    return {"account": secret["account"], "user": secret["user"], "private_key_file": _KEY_FILE}
+
 
 def connect(role: str, warehouse: str):
-    """Key-pair connection from environment variables.
-
-    SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PRIVATE_KEY_FILE.
-    In Lambda, fetch the key from Secrets Manager to /tmp first (not wired here).
-    """
+    """Key-pair connection using the given role and warehouse."""
     import snowflake.connector  # imported here so the pure modules need no connector
 
-    return snowflake.connector.connect(
-        account=os.environ["SNOWFLAKE_ACCOUNT"],
-        user=os.environ["SNOWFLAKE_USER"],
-        private_key_file=os.environ["SNOWFLAKE_PRIVATE_KEY_FILE"],
-        role=role,
-        warehouse=warehouse,
-    )
+    return snowflake.connector.connect(**credentials(), role=role, warehouse=warehouse)
 
 
 def get_work_item(cur, settings: Settings, work_item_id: str) -> dict:

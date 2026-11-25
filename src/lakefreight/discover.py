@@ -2,6 +2,7 @@
 
     lakefreight discover --database SALES --database HR --out metadata.csv
     lakefreight discover --database SALES --sql-only > discover.sql
+    lakefreight discover --database SALES --table LAKEFREIGHT.CONTROL.SOURCE_METADATA
 
 Sizes, columns and types come from Snowflake's metadata views. Personal-data
 flags come from Snowflake's sensitive data classification and from any tags or
@@ -44,6 +45,7 @@ OUTPUT_COLUMNS = [
 
 SOURCES = ("account_usage", "information_schema")
 CLASSIFICATION_TAG = "SNOWFLAKE.CORE.PRIVACY_CATEGORY"
+_TABLE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*(\.[A-Za-z_][A-Za-z0-9_$]*){0,2}$")
 _TAG = re.compile(
     r"^([A-Za-z_][A-Za-z0-9_$]*)\.([A-Za-z_][A-Za-z0-9_$]*)\.([A-Za-z_][A-Za-z0-9_$]*)$"
 )
@@ -327,6 +329,11 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
     )
     parser.add_argument("--out", default="metadata.csv", help="CSV to write")
     parser.add_argument("--sql-only", action="store_true", help="print the query and stop")
+    parser.add_argument(
+        "--table",
+        help="write the result to this Snowflake table (for sql/ddl/02_seed_config.sql) "
+        "instead of a CSV",
+    )
     parser.add_argument("--connection", help="connection name in ~/.snowflake/connections.toml")
     parser.add_argument("--config", help="settings TOML")
     args = parser.parse_args(argv)
@@ -334,11 +341,23 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
     try:
         settings = DiscoverSettings.from_raw(load_raw(args.config))
         sql = build_sql(args.database, settings)
+        if args.table:
+            if not _TABLE.match(args.table):
+                raise DiscoverError(f"--table must be [[DB.]SCHEMA.]TABLE: {args.table!r}")
+            sql = f"CREATE OR REPLACE TABLE {args.table} AS\n{sql}"
     except DiscoverError as exc:
         print(f"lakefreight discover: {exc}", file=sys.stderr)
         return 2
     if args.sql_only:
         print(sql + ";")
+        return 0
+    if args.table:
+        try:
+            run_query(sql, args.connection)
+        except DiscoverError as exc:
+            print(f"lakefreight discover: {exc}", file=sys.stderr)
+            return 1
+        print(f"wrote {args.table}; seed the control tables with sql/ddl/02_seed_config.sql")
         return 0
     out = Path(args.out)
     try:

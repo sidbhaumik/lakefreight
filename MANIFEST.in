@@ -3,3 +3,6 @@ graft examples
 graft docs
 graft sql
 graft stepfunctions
+graft infra
+prune infra/terraform/.terraform
+global-exclude *.tfstate *.tfstate.* .terraform.lock.hcl terraform.tfvars

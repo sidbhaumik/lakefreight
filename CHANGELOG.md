@@ -4,6 +4,17 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+### Added
+
+- `infra/terraform`: Terraform/OpenTofu that deploys the pipeline. On AWS: encrypted, versioned egress buckets with a key per zone, the roles Snowflake uses to write each zone, Secrets Manager for the service user's key, the four Lambda functions, the Step Functions state machine, and optional cross-account replication. On Snowflake: lane warehouses, zone roles, storage integrations, stages, grants and a key-pair service user. Its tests plan the module with mocked Snowflake and check the access policies.
+- `infra/build_lambda.sh` builds the Lambda package from Linux wheels.
+- Lambda functions read their settings from `LAKEFREIGHT_CONFIG_TOML` and Snowflake credentials from Secrets Manager (`SNOWFLAKE_SECRET_ARN`).
+- Zones accept a `kms_key_id`; manifests and schema files are encrypted with the zone's key.
+
+### Changed
+
+- The control-table SQL no longer creates or switches to `MIGRATION.CONTROL`; run it in your control schema.
+
 ## [0.3.0] - 2026-11-25
 
 ### Added

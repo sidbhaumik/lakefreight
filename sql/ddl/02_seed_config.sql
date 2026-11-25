@@ -1,10 +1,10 @@
--- Seed the control tables from the metadata table.
+-- Seed the control tables from SOURCE_METADATA, one row per column, with the
+-- columns `lakefreight discover` produces. Create it in the control schema with:
 --
--- CHANGE-ME: <METADATA_TABLE> and the column names on the right-hand side are
--- assumptions about your metadata table. Adjust them before running.
--- Assumed grain: one row per column, with the table-level values repeated.
-
-USE SCHEMA MIGRATION.CONTROL;
+--   lakefreight discover --database SALES --table SOURCE_METADATA
+--
+-- (add --sql-only to print the CREATE TABLE ... AS statement instead of running it).
+-- Run this script in the control schema, like 01_control_tables.sql.
 
 -- Columns. A column flagged restricted is resolved through the xref.
 INSERT INTO EXTRACT_COLUMN_CONFIG
@@ -17,7 +17,7 @@ SELECT
     m.COLUMN_NAME,
     ROW_NUMBER() OVER (
         PARTITION BY m.TABLE_DATABASE, m.TABLE_SCHEMA, m.TABLE_NAME
-        ORDER BY m.COLUMN_NAME            -- CHANGE-ME: use the ordinal position if the metadata has one
+        ORDER BY m.COLUMN_ORDINAL, m.COLUMN_NAME
     ),
     UPPER(m.COLUMN_DATATYPE),
     m.COLUMN_LENGTH,
@@ -25,7 +25,7 @@ SELECT
     m.COLUMN_PII_FLAG,
     m.COLUMN_RESTRICTED_FLAG,
     COALESCE(m.COLUMN_RESTRICTED_FLAG, 'N') = 'Y'
-FROM <METADATA_TABLE> m;
+FROM SOURCE_METADATA m;
 
 -- Tables. Zone rules fail closed: only an explicit N/N is INTERNAL.
 -- 107374182400 = full_threshold_bytes in lakefreight.toml (the default).
@@ -34,10 +34,10 @@ INSERT INTO EXTRACT_CONFIG
 WITH t AS (
     SELECT
         TABLE_DATABASE, TABLE_SCHEMA, TABLE_NAME,
-        MAX(TABLE_SIZE)      AS TABLE_BYTES,     -- CHANGE-ME: convert to bytes if stored in another unit
+        MAX(TABLE_SIZE_BYTES) AS TABLE_BYTES,
         MAX(TABLE_PII_FLAG)  AS PII_FLAG,
         MAX(TABLE_RESTRICTED_FLAG)  AS RESTRICTED_FLAG
-    FROM <METADATA_TABLE>
+    FROM SOURCE_METADATA
     GROUP BY 1, 2, 3
 ), z AS (
     SELECT

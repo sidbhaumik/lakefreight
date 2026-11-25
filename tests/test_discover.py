@@ -267,3 +267,38 @@ def test_cli_sql_only_and_live_run(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(discover, "run_query", lambda sql, name: [])
     assert cli.main(["discover", "--database", "NOPE", "--out", "n.csv"]) == 1
     assert not (tmp_path / "n.csv").exists()
+
+
+def test_cli_table_writes_create_table_as(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LAKEFREIGHT_CONFIG", raising=False)
+    args = ["discover", "--database", "TRAVEL", "--table", "LAKEFREIGHT.CONTROL.SOURCE_METADATA"]
+    assert cli.main([*args, "--sql-only"]) == 0
+    sql = capsys.readouterr().out
+    assert sql.startswith("CREATE OR REPLACE TABLE LAKEFREIGHT.CONTROL.SOURCE_METADATA AS\nWITH")
+
+    ran = []
+    monkeypatch.setattr(discover, "run_query", lambda sql, name: ran.append(sql) or [("ok",)])
+    assert cli.main(args) == 0
+    assert ran and ran[0].startswith("CREATE OR REPLACE TABLE")
+    assert cli.main(["discover", "--database", "TRAVEL", "--table", "x; DROP TABLE y"]) == 2
+
+
+def test_seed_script_reads_discover_columns():
+    from pathlib import Path
+
+    seed = (Path(__file__).resolve().parents[1] / "sql" / "ddl" / "02_seed_config.sql").read_text()
+    used = {
+        "TABLE_SIZE_BYTES",
+        "COLUMN_ORDINAL",
+        "COLUMN_DATATYPE",
+        "COLUMN_LENGTH",
+        "COLUMN_DESCRIPTION",
+        "COLUMN_PII_FLAG",
+        "COLUMN_RESTRICTED_FLAG",
+        "TABLE_PII_FLAG",
+        "TABLE_RESTRICTED_FLAG",
+    }
+    assert used <= {c.upper() for c in discover.OUTPUT_COLUMNS}
+    assert all(c in seed for c in used)
+    assert "<METADATA_TABLE>" not in seed

@@ -167,7 +167,7 @@ Measure and record:
 
 ## 8. Run the bulk extraction
 
-Create work items (`python -m lakefreight.planning`), then run one state-machine execution per lane.
+Deploy the pipeline with [`infra/`](../infra/README.md), create work items (`python -m lakefreight.planning`), then run one state-machine execution per lane.
 
 | Lane | Tables | Why separate |
 |---|---|---|

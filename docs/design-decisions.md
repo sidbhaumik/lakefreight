@@ -106,11 +106,20 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 **Why.** Snowflake stores up to nanoseconds, but Spark, Databricks and Iceberg v2 read only microseconds, and Delta Lake has no `TIME` type. Losing sub-microsecond digits is the price of a table every target engine can read.
 
+## 15. Infrastructure is Terraform, covering both AWS and Snowflake
+
+**Decision.** One Terraform/OpenTofu configuration creates the AWS side (buckets, keys, roles, Lambda functions, state machine, optional replication) and the Snowflake side (warehouses, roles, storage integrations, stages, grants, service user).
+
+**Rejected.** AWS CDK or CloudFormation for AWS plus SQL scripts for Snowflake.
+
+**Why.** The two sides reference each other: Snowflake's storage integration needs the AWS role's ARN, and the role's trust policy needs the integration's Snowflake identity. One tool resolves that in a single plan. Terraform is also what most data platform teams already run, and it works with either Terraform or OpenTofu.
+
 ## Known gaps
 
 - Large tables with no date column run as one unpartitioned `COPY`; a single-pass `PARTITION BY` unload is not implemented.
 - A single month larger than twice the target chunk size is flagged but not split further.
-- Whether an asynchronous `COPY` survives the submitting Lambda's return depends on connection handling and the account's `ABORT_DETACHED_QUERY` setting; this needs confirming against a live account.
+- An asynchronous `COPY` must survive the submitting Lambda's return. `infra/terraform` sets `ABORT_DETACHED_QUERY = FALSE` on the pipeline's service user for this, but it has not been confirmed against a live account.
+- `infra/terraform` has been validated and planned against the real provider schemas with mocked Snowflake and offline AWS, but never applied. IAM policies, key policies and cross-account replication need a first deployment to a test account.
 - The Parquet cast rules for timestamps, `TIME` and semi-structured types are based on documented Snowflake behaviour and have not been tested against live consumers. In particular, whether Snowflake writes `TIMESTAMP_NTZ(6)` as microsecond Parquet timestamps needs confirming in a pilot; registration will refuse the table if it does not.
 - Registered tables are read back with delta-rs, pyiceberg and DuckDB in the tests, not yet with Spark, Databricks, Snowflake, Redshift or BigQuery.
 - Registration creates a table once. Adding a re-extracted chunk to an existing table is not supported yet.

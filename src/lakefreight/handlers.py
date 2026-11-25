@@ -193,16 +193,24 @@ def reconcile(event, _context=None):
             chunks_in_table=chunks_in_table,
         )
         s3 = _s3()
+        # Encrypt lakefreight's own files with the zone's key, like the data files.
+        sse = (
+            {"ServerSideEncryption": "aws:kms", "SSEKMSKeyId": zone.kms_key_id}
+            if zone.kms_key_id
+            else {}
+        )
         s3.put_object(
             Bucket=zone.bucket,
             Key=f"{base}/_schema.json",
             Body=json.dumps(rules.build_schema(table), indent=2).encode(),
+            **sse,
         )
         # The manifest is the commit marker: written last.
         s3.put_object(
             Bucket=zone.bucket,
             Key=f"{base}/chunk={item['CHUNK_ID']}/run_id={event['run_id']}/manifest.json",
             Body=json.dumps(manifest, indent=2).encode(),
+            **sse,
         )
         update_work_item(cur, settings, work_item_id, STATUS="RECONCILED", **counts)
         return {**event, "state": "RECONCILED"}

@@ -21,7 +21,7 @@ It is built for the hard version of the job: thousands of tables, petabytes of d
 | **File format** | Parquet, with a manifest and schema sidecar per table | |
 | **Table format** | Delta Lake or Apache Iceberg, registered over the same Parquet files without rewriting them | Incremental re-registration after a re-extract |
 | **Readers** | Any engine that reads Parquet, Delta or Iceberg: Databricks, Snowflake, Redshift, BigQuery | One-step registration in each engine's catalog |
-| **Orchestration** | AWS Step Functions | |
+| **Orchestration** | AWS Step Functions, deployed with Terraform or OpenTofu | |
 
 **Status:** alpha. SQL generation, chunk planning, zone routing, reconciliation rules and table registration are unit tested; registered Delta and Iceberg tables are read back with delta-rs, pyiceberg and DuckDB in the tests. The Snowflake and AWS execution path (control-table DDL, Lambda handlers, state machine) and reads from Spark or Databricks have not yet been run against live services.
 
@@ -85,7 +85,7 @@ lakefreight config --write
    lakefreight plan --metadata metadata.csv --out generated
    ```
 
-3. **Unload** with the generated SQL, or at scale with the Step Functions pipeline.
+3. **Unload** with the generated SQL, or at scale with the Step Functions pipeline. [`infra/`](https://github.com/sidbhaumik/lakefreight/blob/main/infra/README.md) deploys it: buckets, keys, Snowflake roles and stages, the Lambda functions and the state machine.
 4. **Register** each table as Delta Lake or Iceberg once its chunks have landed.
 
    ```bash
@@ -157,6 +157,8 @@ The repo includes a [Claude Code skill](https://github.com/sidbhaumik/lakefreigh
 | `src/lakefreight/planning.py` | Creates work items in Snowflake from the control tables |
 | `src/lakefreight/handlers.py` | Lambda handlers: list, submit, poll, reconcile |
 | `src/lakefreight/register.py` | `lakefreight register`: Delta Lake or Iceberg metadata over the unloaded files |
+| `infra/terraform/` | Terraform/OpenTofu for the AWS and Snowflake side; see `infra/README.md` |
+| `infra/build_lambda.sh` | Builds the Lambda package |
 | `stepfunctions/extract_lane.asl.json` | State machine, one execution per lane |
 | `sql/ddl/` | Control tables and the script that seeds them from metadata |
 | `src/lakefreight/defaults.toml` | Default settings: thresholds, zones, lanes, xref names. `lakefreight config --write` makes an editable copy |
@@ -165,7 +167,6 @@ The repo includes a [Claude Code skill](https://github.com/sidbhaumik/lakefreigh
 
 ## Not included
 
-- Infrastructure as code: buckets, KMS keys, replication rules, stages, storage integrations, IAM, Lambda packaging.
 - A single-pass `PARTITION BY` unload for large tables with no date column.
 - Replication tracking, egress purge, and the delta pass for tables that change during the migration.
 - Adding a re-extracted chunk to a table that is already registered. Today, delete the table metadata and register again.

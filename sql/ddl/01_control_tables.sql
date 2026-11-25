@@ -1,8 +1,10 @@
--- Control tables for the migration. Run once in the control schema.
--- Replace MIGRATION.CONTROL if your lakefreight.toml uses a different control_schema.
-
-CREATE SCHEMA IF NOT EXISTS MIGRATION.CONTROL;
-USE SCHEMA MIGRATION.CONTROL;
+-- Control tables for the migration. Run once, in the control schema:
+--
+--   USE SCHEMA LAKEFREIGHT.CONTROL;   -- the schema infra/terraform creates,
+--                                     -- or the control_schema in lakefreight.toml
+--
+-- With infra/terraform, run this after `terraform apply`, so the extract roles'
+-- future grants apply to these tables. Without it, create the schema first.
 
 -- One row per source table.
 CREATE TABLE IF NOT EXISTS EXTRACT_CONFIG (

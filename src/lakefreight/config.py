@@ -4,8 +4,10 @@ Settings are read from the first of these that exists:
 
 1. the path passed in (the --config option)
 2. the file named by the LAKEFREIGHT_CONFIG environment variable
-3. lakefreight.toml in the current directory
-4. the defaults shipped with the package (write a copy with `lakefreight config --write`)
+3. the TOML text in the LAKEFREIGHT_CONFIG_TOML environment variable (used by the
+   deployed Lambda functions)
+4. lakefreight.toml in the current directory
+5. the defaults shipped with the package (write a copy with `lakefreight config --write`)
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ class Zone:
     bucket: str
     prefix: str
     role: str
+    kms_key_id: str | None = None  # key for files lakefreight writes itself (manifests)
 
 
 @dataclass(frozen=True)
@@ -65,6 +68,12 @@ def config_source(path: str | Path | None = None) -> Path | None:
 
 def load_raw(path: str | Path | None = None) -> dict:
     """The settings as parsed TOML, from the first source that exists."""
+    if (
+        not path
+        and not os.environ.get("LAKEFREIGHT_CONFIG")
+        and os.environ.get("LAKEFREIGHT_CONFIG_TOML")
+    ):
+        return tomllib.loads(os.environ["LAKEFREIGHT_CONFIG_TOML"])
     source = config_source(path)
     if source is None:
         return tomllib.loads(default_config_text())

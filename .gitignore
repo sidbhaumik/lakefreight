@@ -7,3 +7,8 @@ generated/
 .ruff_cache/
 dist/
 build/
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform.tfvars

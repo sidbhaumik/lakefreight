@@ -1,0 +1,28 @@
+# Written by infra/terraform. Edit the Terraform variables, not this file.
+
+[extract]
+control_schema = "${control_fqn}"
+full_threshold_bytes = ${full_threshold_bytes}
+target_chunk_bytes = ${target_chunk_bytes}
+max_file_size_bytes = 1073741824
+unmatched_token_threshold = ${unmatched_token_threshold}
+
+[xref]
+table = "${xref_table}"
+token_column = "${xref_token_column}"
+clear_column = "${xref_clear_column}"
+%{ for zone, z in zones ~}
+
+[zones.${zone}]
+stage = "${z.stage}"
+bucket = "${z.bucket}"
+prefix = "${z.prefix}"
+role = "${z.role}"
+kms_key_id = "${z.kms_key_id}"
+%{ endfor ~}
+%{ for lane, l in lanes ~}
+
+[lanes.${lane}]
+warehouse = "${l.warehouse}"
+max_concurrency = ${l.max_concurrency}
+%{ endfor ~}

@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars and edit.
+
+name       = "lakefreight"
+aws_region = "us-east-2" # the region of your Snowflake account
+
+source_databases = ["SALES", "HR"]
+
+# Only if some columns hold tokens to swap for clear values on extract.
+# xref_table = "SECURE.PUBLIC.TOKEN_XREF"
+
+# One line, without the BEGIN/END PUBLIC KEY lines.
+service_user_public_key = "MIIBIjANBgkqh..."
+
+# Optional: replicate to the receiving account.
+# replication = {
+#   egress = {
+#     destination_bucket_arn  = "arn:aws:s3:::receiver-ingress"
+#     destination_account_id  = "222222222222"
+#     destination_kms_key_arn = "arn:aws:kms:us-east-1:222222222222:key/..."
+#   }
+# }
