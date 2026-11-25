@@ -7,7 +7,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = ["jinja2>=3.1"]
-keywords = ["snowflake", "s3", "parquet", "data-migration", "lakehouse", "databricks", "redshift", "bigquery"]
+keywords = ["snowflake", "s3", "parquet", "data-migration", "lakehouse", "databricks", "redshift", "bigquery", "delta-lake", "iceberg"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -27,7 +27,16 @@ Issues = "https://github.com/sidbhaumik/lakefreight/issues"
 lakefreight = "lakefreight.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "pyarrow>=14",
+    "deltalake>=1.0",
+    "pyiceberg[sql-sqlite]>=0.9",
+]
+# Register unloaded files as open table formats (lakefreight register).
+delta = ["pyarrow>=14", "deltalake>=1.0"]
+iceberg = ["pyarrow>=14", "pyiceberg>=0.9"]
 # Needed only to run against Snowflake and AWS (planning.py, handlers.py).
 pipeline = ["snowflake-connector-python>=3.12", "boto3>=1.34"]
 

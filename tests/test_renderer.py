@@ -22,7 +22,7 @@ def test_internal_unload_casts_and_targets_internal_stage():
     assert sql.startswith(
         "COPY INTO @MIGRATION.CONTROL.EGRESS_INTERNAL_STAGE/SALES/PUBLIC/ORDERS/chunk=full/run_id=run1/"
     )
-    assert """CONVERT_TIMEZONE('UTC', t."CREATED_AT")::TIMESTAMP_NTZ AS "CREATED_AT\"""" in sql
+    assert """CONVERT_TIMEZONE('UTC', t."CREATED_AT")::TIMESTAMP_NTZ(6) AS "CREATED_AT\"""" in sql
     assert 'TO_JSON(t."PAYLOAD") AS "PAYLOAD"' in sql
     assert "JOIN" not in sql and "WHERE" not in sql
     assert "TYPE = PARQUET" in sql and "HEADER = TRUE" in sql
@@ -97,3 +97,15 @@ def test_reconcile_rules():
     assert evaluate(101, 100, 0, 0)[0] is False  # rows duplicated by the join
     assert evaluate(100, 100, 5, 0)[0] is False  # unmatched tokens
     assert evaluate(100, 100, 5, 10)[0] is True
+
+
+def test_timestamps_leave_as_microseconds_and_time_as_text():
+    cols = (
+        ColumnSpec("LOADED", "TIMESTAMP_NTZ(9)"),
+        ColumnSpec("SEEN", "TIMESTAMP_LTZ(9)"),
+        ColumnSpec("OPENS", "TIME(9)"),
+    )
+    sql = renderer.unload_sql(table(columns=cols), None, "full", "r", settings)
+    assert 't."LOADED"::TIMESTAMP_NTZ(6) AS "LOADED"' in sql
+    assert """CONVERT_TIMEZONE('UTC', t."SEEN")::TIMESTAMP_NTZ(6) AS "SEEN\"""" in sql
+    assert """TO_VARCHAR(t."OPENS", 'HH24:MI:SS.FF6') AS "OPENS\"""" in sql

@@ -4,6 +4,16 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+### Added
+
+- `lakefreight register`: registers a table's unloaded Parquet files as a Delta Lake or Apache Iceberg table without rewriting them. Only files named in a committed manifest are included, and the newest manifest per chunk wins. Refuses incomplete tables, files with the wrong size, schema drift between chunks, and nanosecond timestamps.
+- `delta` and `iceberg` install extras.
+- Manifests record `chunks_in_table` and `written_at`, so readers can check completeness and choose between reruns.
+
+### Changed
+
+- Timestamp columns are unloaded at microsecond precision (`TIMESTAMP_NTZ(6)`), and `TIME` columns as text, so Spark, Databricks and Iceberg v2 can read the files.
+
 ## [0.1.0] - 2026-11-25
 
 First public release.

@@ -15,8 +15,9 @@ The examples use an illustrative migration: 3,000 tables, 2 PB, 10 weeks, with s
 7. [Run a pilot](#7-run-a-pilot)
 8. [Run the bulk extraction](#8-run-the-bulk-extraction)
 9. [Transfer to the target account](#9-transfer-to-the-target-account)
-10. [Reconcile and close out](#10-reconcile-and-close-out)
-11. [Common mistakes](#11-common-mistakes)
+10. [Register Delta or Iceberg tables](#10-register-delta-or-iceberg-tables)
+11. [Reconcile and close out](#11-reconcile-and-close-out)
+12. [Common mistakes](#12-common-mistakes)
 
 ## 1. Before you start
 
@@ -167,7 +168,39 @@ If source tables are still being written, extract from a zero-copy clone so that
 - Treat the manifest as the commit marker. It is written last, only after reconciliation, and the receiver loads only prefixes that have one. Files from a failed attempt have no manifest and are ignored.
 - Delete egress files once the receiver acknowledges them. Holding everything until the end is expensive.
 
-## 10. Reconcile and close out
+## 10. Register Delta or Iceberg tables
+
+Plain Parquet is readable everywhere, but readers then have to discover the files and infer the schema themselves. Registering a table format gives each table one schema, an exact file list, and row counts readers can use.
+
+lakefreight writes the table metadata over the files already unloaded. Nothing is copied or rewritten.
+
+| Format | Best for | Where to run it |
+|---|---|---|
+| Delta Lake | Databricks | Anywhere. The log uses paths relative to the table folder, so it stays valid after replication to another bucket. |
+| Apache Iceberg | Mixed engines: Snowflake, Redshift, BigQuery, Databricks | Against the bucket the readers will use. Iceberg stores absolute paths. |
+
+```bash
+lakefreight register --format delta --table-root s3://ingress/internal/DB/SCHEMA/TABLE
+```
+
+```bash
+lakefreight register --format iceberg --table-root s3://ingress/internal/DB/SCHEMA/TABLE --catalog glue --identifier db.table
+```
+
+Install the extra you need first: `pip install "lakefreight[delta]"` or `"lakefreight[iceberg]"`. The Iceberg catalog is configured the usual pyiceberg way, in `.pyiceberg.yaml` or with `--catalog-prop KEY=VALUE`.
+
+Registration refuses to run when:
+
+- a chunk has no manifest yet, unless you pass `--allow-partial`
+- a listed file is missing or has the wrong size, which usually means replication hasn't finished
+- chunks have different schemas, which means the source table changed during the extract
+- a column holds nanosecond timestamps
+
+If a chunk was extracted more than once, the newest manifest wins and the older run is reported.
+
+**Check:** read the table from each target engine and compare its row count with the sum of the chunk manifests.
+
+## 11. Reconcile and close out
 
 | Level | Check |
 |---|---|
@@ -178,7 +211,7 @@ If source tables are still being written, extract from a zero-copy clone so that
 
 Then purge the egress buckets, drop any clones, and hand over the snapshot times and per-chunk counts for the delta pass.
 
-## 11. Common mistakes
+## 12. Common mistakes
 
 | Mistake | What happens | Avoid it by |
 |---|---|---|
@@ -191,4 +224,6 @@ Then purge the egress buckets, drop any clones, and hand over the snapshot times
 | Treating a missing flag as non-sensitive | Unclassified data lands in the open zone | Failing closed |
 | Starting small tables first | The largest tables finish after the deadline | Starting the largest tables on day one |
 | Unloading time-zone-aware timestamps as they are | The unload fails or readers disagree | Casting to UTC `TIMESTAMP_NTZ` |
+| Unloading nanosecond timestamps | Spark, Databricks and Iceberg v2 can't read the files | Casting to `TIMESTAMP_NTZ(6)` |
+| Building a table from every file in the folder | Files from failed attempts appear as duplicate rows | Registering only files named in a manifest |
 | Releasing files before reconciling | The receiver loads partial data | Writing the manifest last |

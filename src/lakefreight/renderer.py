@@ -41,8 +41,15 @@ def select_expr(col: ColumnSpec, xref_alias: str | None, clear_column: str) -> s
     if xref_alias:
         return f"{xref_alias}.{quote_ident(clear_column)} AS {name}"
     base = _base_type(col.data_type)
+    # Timestamps leave as microsecond, zone-less UTC values: Spark, Databricks and
+    # Iceberg v2 cannot read nanosecond Parquet timestamps.
     if base in ("TIMESTAMP_TZ", "TIMESTAMP_LTZ"):
-        return f"CONVERT_TIMEZONE('UTC', t.{name})::TIMESTAMP_NTZ AS {name}"
+        return f"CONVERT_TIMEZONE('UTC', t.{name})::TIMESTAMP_NTZ(6) AS {name}"
+    if base in ("TIMESTAMP_NTZ", "DATETIME"):
+        return f"t.{name}::TIMESTAMP_NTZ(6) AS {name}"
+    if base == "TIME":
+        # Delta Lake has no TIME type.
+        return f"TO_VARCHAR(t.{name}, 'HH24:MI:SS.FF6') AS {name}"
     if base in ("VARIANT", "OBJECT", "ARRAY"):
         return f"TO_JSON(t.{name}) AS {name}"
     if base in ("GEOGRAPHY", "GEOMETRY"):

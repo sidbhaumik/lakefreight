@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from .models import TableSpec
 
 
@@ -31,7 +33,11 @@ def build_manifest(
     snapshot_ts: str | None,
     files: list[dict],
     rows: int,
+    chunks_in_table: int | None = None,
+    written_at: str | None = None,
 ) -> dict:
+    """`files` entries are {"name", "size", "rows"}; names are relative to the
+    manifest's own folder. `chunks_in_table` lets a reader check completeness."""
     return {
         "database": table.database,
         "schema": table.schema,
@@ -45,6 +51,8 @@ def build_manifest(
         "file_count": len(files),
         "bytes": sum(f["size"] for f in files),
         "files": files,
+        "chunks_in_table": chunks_in_table,
+        "written_at": written_at or datetime.now(UTC).isoformat(timespec="seconds"),
     }
 
 

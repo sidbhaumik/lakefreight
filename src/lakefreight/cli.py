@@ -1,6 +1,7 @@
 """lakefreight command line.
 
 lakefreight plan --metadata tables.csv [--profiles months.csv] [--out generated]
+lakefreight register --format delta|iceberg --table-root s3://bucket/zone/DB/SCHEMA/TABLE
 """
 
 from __future__ import annotations
@@ -8,10 +9,11 @@ from __future__ import annotations
 import sys
 from importlib.metadata import PackageNotFoundError, version
 
-from . import generate
+from . import generate, register
 
 COMMANDS = {
     "plan": (generate.main, "Generate extract SQL and a work-item list from a metadata CSV"),
+    "register": (register.main, "Register unloaded Parquet files as a Delta or Iceberg table"),
 }
 
 
@@ -24,7 +26,7 @@ def _version() -> str:
 
 def _usage() -> str:
     lines = ["usage: lakefreight <command> [options]", "", "commands:"]
-    lines += [f"  {name:<8}{desc}" for name, (_, desc) in COMMANDS.items()]
+    lines += [f"  {name:<10}{desc}" for name, (_, desc) in COMMANDS.items()]
     lines += ["", "Run 'lakefreight <command> --help' for a command's options."]
     return "\n".join(lines)
 

@@ -176,6 +176,12 @@ def reconcile(event, _context=None):
 
         zone = settings.zones[table.zone]
         base = f"{zone.prefix}/{table.path}"
+        cur.execute(
+            f"SELECT COUNT(*) FROM {settings.control_schema}.EXTRACT_WORK_ITEM "
+            "WHERE DATABASE_NAME = %s AND SCHEMA_NAME = %s AND TABLE_NAME = %s",
+            (item["DATABASE_NAME"], item["SCHEMA_NAME"], item["TABLE_NAME"]),
+        )
+        chunks_in_table = int(cur.fetchone()[0])
         manifest = rules.build_manifest(
             table,
             item["CHUNK_ID"],
@@ -184,6 +190,7 @@ def reconcile(event, _context=None):
             str(item["SNAPSHOT_TS"]) if item["SNAPSHOT_TS"] else None,
             files,
             rows_unloaded,
+            chunks_in_table=chunks_in_table,
         )
         s3 = _s3()
         s3.put_object(

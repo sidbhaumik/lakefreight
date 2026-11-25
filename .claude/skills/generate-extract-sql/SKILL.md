@@ -78,7 +78,7 @@ Knowing these lets you explain the output and spot input problems.
 - **Restricted columns are detokenized with a `LEFT JOIN` to the xref.** An inner join silently drops every row whose token is NULL or missing from the xref. The generator refuses to put clear values in any zone but RESTRICTED.
 - **Chunk predicates cover every value.** The first chunk has no lower bound, the last has no upper bound, and there is always a NULL chunk, so rows with unexpected dates cannot be missed.
 - **Every unload comes with its reconciliation queries.** The source count is taken without the join, so it catches both dropped rows and rows duplicated by a non-unique xref.
-- **Types are cast for Parquet.** Time-zone-aware timestamps become UTC `TIMESTAMP_NTZ`, semi-structured columns become JSON text, geospatial columns become WKT.
+- **Types are cast for Parquet.** Timestamps become microsecond `TIMESTAMP_NTZ(6)` (time-zone-aware ones converted to UTC), `TIME` becomes text, semi-structured columns become JSON text, geospatial columns become WKT. These choices keep the files readable by Spark, Databricks and Iceberg.
 
 ## What this skill does not do
 

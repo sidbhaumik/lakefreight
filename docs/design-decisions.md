@@ -92,9 +92,25 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 **Why.** Snowflake charges for cross-region unloads. In-region unloads avoid that charge, and S3's own transfer is the cheaper hop.
 
+## 13. Table formats are registered over the unloaded files
+
+**Decision.** `lakefreight register` writes Delta Lake or Iceberg metadata that points at the Parquet files Snowflake already wrote. It includes only files named in a committed manifest, picking the newest manifest per chunk.
+
+**Rejected.** Rewriting the data through Spark into a new Delta or Iceberg table; converting the whole folder with a generic tool.
+
+**Why.** Rewriting petabytes doubles the cost and time of the move. A generic folder conversion would pick up files from failed attempts, which have no manifest, and turn them into duplicate rows.
+
+## 14. Timestamps leave at microsecond precision
+
+**Decision.** Timestamp columns are unloaded as `TIMESTAMP_NTZ(6)` (time-zone-aware ones converted to UTC first), and `TIME` columns as text. Registration refuses files that still hold nanosecond timestamps.
+
+**Why.** Snowflake stores up to nanoseconds, but Spark, Databricks and Iceberg v2 read only microseconds, and Delta Lake has no `TIME` type. Losing sub-microsecond digits is the price of a table every target engine can read.
+
 ## Known gaps
 
 - Large tables with no date column run as one unpartitioned `COPY`; a single-pass `PARTITION BY` unload is not implemented.
 - A single month larger than twice the target chunk size is flagged but not split further.
 - Whether an asynchronous `COPY` survives the submitting Lambda's return depends on connection handling and the account's `ABORT_DETACHED_QUERY` setting; this needs confirming against a live account.
-- The Parquet cast rules for time-zone-aware timestamps and semi-structured types are based on documented Snowflake behaviour and have not been tested against live consumers.
+- The Parquet cast rules for timestamps, `TIME` and semi-structured types are based on documented Snowflake behaviour and have not been tested against live consumers. In particular, whether Snowflake writes `TIMESTAMP_NTZ(6)` as microsecond Parquet timestamps needs confirming in a pilot; registration will refuse the table if it does not.
+- Registered tables are read back with delta-rs, pyiceberg and DuckDB in the tests, not yet with Spark, Databricks, Snowflake, Redshift or BigQuery.
+- Registration creates a table once. Adding a re-extracted chunk to an existing table is not supported yet.

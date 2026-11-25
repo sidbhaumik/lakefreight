@@ -17,11 +17,12 @@ It is built for the hard version of the job: thousands of tables, petabytes of d
 |---|---|---|
 | **Source** | Snowflake | Other warehouses |
 | **Target storage** | Amazon S3 | Google Cloud Storage, Azure Data Lake Storage |
-| **File format** | Parquet, with a manifest and schema sidecar per table | Delta Lake and Apache Iceberg metadata over the same Parquet files |
-| **Readers** | Any engine that reads Parquet: Databricks, Snowflake, Redshift, BigQuery | Native table registration in each |
+| **File format** | Parquet, with a manifest and schema sidecar per table | |
+| **Table format** | Delta Lake or Apache Iceberg, registered over the same Parquet files without rewriting them | Incremental re-registration after a re-extract |
+| **Readers** | Any engine that reads Parquet, Delta or Iceberg: Databricks, Snowflake, Redshift, BigQuery | One-step registration in each engine's catalog |
 | **Orchestration** | AWS Step Functions | |
 
-**Status:** alpha. SQL generation, chunk planning, zone routing and reconciliation rules are unit tested. The Snowflake and AWS execution path (control-table DDL, Lambda handlers, state machine) has not yet been run against live services.
+**Status:** alpha. SQL generation, chunk planning, zone routing, reconciliation rules and table registration are unit tested; registered Delta and Iceberg tables are read back with delta-rs, pyiceberg and DuckDB in the tests. The Snowflake and AWS execution path (control-table DDL, Lambda handlers, state machine) and reads from Spark or Databricks have not yet been run against live services.
 
 ## What it does
 
@@ -51,6 +52,7 @@ flowchart LR
 - **Detokenizes restricted columns** through a cross-reference table, with checks that the join neither drops nor duplicates rows.
 - **Reconciles before release.** A manifest is written only when the unloaded row count equals the source count; the receiving side loads only what has a manifest.
 - **Restarts at chunk level.** Every table or chunk is a tracked work item.
+- **Registers open table formats.** `lakefreight register` turns a table's unloaded files into a Delta Lake or Apache Iceberg table without rewriting them. Only files named in a committed manifest are included; it refuses incomplete tables, files still replicating, schema drift between chunks, and nanosecond timestamps that Spark and Iceberg v2 can't read.
 
 ## Try it in two minutes
 
@@ -79,6 +81,12 @@ Output:
 ```
 
 Open `generated/RESTRICTED/TRAVEL.BOOKINGS.RESERVATION/0002_202203_202204.sql` to see an unload with the xref join and its two reconciliation queries.
+
+To register a table's unloaded files as Delta Lake (Iceberg works the same way with `--format iceberg`, a catalog and a table name):
+
+```bash
+.venv/bin/lakefreight register --format delta --table-root s3://my-egress/internal/TRAVEL/BOOKINGS/RESERVATION
+```
 
 Run the tests:
 
@@ -109,6 +117,7 @@ The repo includes a [Claude Code skill](.claude/skills/generate-extract-sql/SKIL
 | `src/lakefreight/reconcile.py` | Pass/fail rules, manifest and schema sidecar |
 | `src/lakefreight/planning.py` | Creates work items in Snowflake from the control tables |
 | `src/lakefreight/handlers.py` | Lambda handlers: list, submit, poll, reconcile |
+| `src/lakefreight/register.py` | `lakefreight register`: Delta Lake or Iceberg metadata over the unloaded files |
 | `stepfunctions/extract_lane.asl.json` | State machine, one execution per lane |
 | `sql/ddl/` | Control tables and the script that seeds them from metadata |
 | `config/defaults.toml` | Thresholds, zones, lanes, xref names |
@@ -120,6 +129,7 @@ The repo includes a [Claude Code skill](.claude/skills/generate-extract-sql/SKIL
 - Infrastructure as code: buckets, KMS keys, replication rules, stages, storage integrations, IAM, Lambda packaging.
 - A single-pass `PARTITION BY` unload for large tables with no date column.
 - Replication tracking, egress purge, and the delta pass for tables that change during the migration.
+- Adding a re-extracted chunk to a table that is already registered. Today, delete the table metadata and register again.
 
 ## Contributing
 
