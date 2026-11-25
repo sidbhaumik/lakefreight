@@ -1,0 +1,19 @@
+COPY INTO @{{ stage }}/{{ unload_path }}/
+FROM (
+  SELECT
+{%- for expr in select_exprs %}
+    {{ expr }}{{ "," if not loop.last }}
+{%- endfor %}
+  FROM {{ source_fqn }} t
+{%- for join in xref_joins %}
+  LEFT JOIN {{ xref_table }} {{ join.alias }}
+    ON t.{{ join.column }} = {{ join.alias }}.{{ token_column }}
+{%- endfor %}
+{%- if predicate %}
+  WHERE {{ predicate }}
+{%- endif %}
+)
+FILE_FORMAT = (TYPE = PARQUET COMPRESSION = SNAPPY)
+HEADER = TRUE
+MAX_FILE_SIZE = {{ max_file_size }}
+DETAILED_OUTPUT = TRUE

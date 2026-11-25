@@ -1,0 +1,25 @@
+[project]
+name = "snowflake-s3-migration"
+version = "0.1.0"
+description = "Metadata-driven Snowflake to S3 Parquet migration"
+requires-python = ">=3.11"
+dependencies = ["jinja2>=3.1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+# Needed only to run against Snowflake and AWS (planning.py, handlers.py).
+pipeline = ["snowflake-connector-python>=3.12", "boto3>=1.34"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+migrator = ["templates/*.j2"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

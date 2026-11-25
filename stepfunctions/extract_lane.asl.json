@@ -1,0 +1,149 @@
+{
+  "Comment": "Extract one lane. Input: {\"lane\": \"LARGE\" | \"SMALL\" | \"RESTRICTED\"}. Replace the ${...Arn} placeholders at deploy time.",
+  "StartAt": "ListItems",
+  "States": {
+    "ListItems": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ListItemsFunctionArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 10,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "AnyItems"
+    },
+    "AnyItems": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.count",
+          "NumericGreaterThan": 0,
+          "Next": "ExtractItems"
+        }
+      ],
+      "Default": "NothingToDo"
+    },
+    "NothingToDo": {
+      "Type": "Succeed"
+    },
+    "ExtractItems": {
+      "Type": "Map",
+      "ItemReader": {
+        "Resource": "arn:aws:states:::s3:getObject",
+        "ReaderConfig": {
+          "InputType": "JSON"
+        },
+        "Parameters": {
+          "Bucket.$": "$.items.bucket",
+          "Key.$": "$.items.key"
+        }
+      },
+      "MaxConcurrencyPath": "$.max_concurrency",
+      "ToleratedFailurePercentage": 100,
+      "ItemProcessor": {
+        "ProcessorConfig": {
+          "Mode": "DISTRIBUTED",
+          "ExecutionType": "STANDARD"
+        },
+        "StartAt": "Submit",
+        "States": {
+          "Submit": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+              "FunctionName": "${SubmitFunctionArn}",
+              "Payload.$": "$"
+            },
+            "OutputPath": "$.Payload",
+            "Next": "Wait"
+          },
+          "Wait": {
+            "Type": "Wait",
+            "Seconds": 60,
+            "Next": "Poll"
+          },
+          "Poll": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+              "FunctionName": "${PollFunctionArn}",
+              "Payload.$": "$"
+            },
+            "OutputPath": "$.Payload",
+            "Retry": [
+              {
+                "ErrorEquals": ["States.TaskFailed"],
+                "IntervalSeconds": 15,
+                "MaxAttempts": 5,
+                "BackoffRate": 2
+              }
+            ],
+            "Next": "CopyDone"
+          },
+          "CopyDone": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.state",
+                "StringEquals": "RUNNING",
+                "Next": "Wait"
+              },
+              {
+                "Variable": "$.state",
+                "StringEquals": "SUCCEEDED",
+                "Next": "Reconcile"
+              }
+            ],
+            "Default": "ItemFailed"
+          },
+          "Reconcile": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+              "FunctionName": "${ReconcileFunctionArn}",
+              "Payload.$": "$"
+            },
+            "OutputPath": "$.Payload",
+            "Retry": [
+              {
+                "ErrorEquals": ["States.TaskFailed"],
+                "IntervalSeconds": 15,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }
+            ],
+            "Next": "Reconciled"
+          },
+          "Reconciled": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.state",
+                "StringEquals": "RECONCILED",
+                "Next": "ItemDone"
+              }
+            ],
+            "Default": "ItemFailed"
+          },
+          "ItemDone": {
+            "Type": "Succeed"
+          },
+          "ItemFailed": {
+            "Type": "Fail",
+            "Error": "WorkItemFailed",
+            "Cause": "See LAST_ERROR on the work item in EXTRACT_WORK_ITEM"
+          }
+        }
+      },
+      "End": true
+    }
+  }
+}

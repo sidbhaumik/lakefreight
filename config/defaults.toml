@@ -1,0 +1,45 @@
+# Defaults for the migration. Every value marked CHANGE-ME is a placeholder.
+
+[extract]
+control_schema = "MIGRATION.CONTROL"        # CHANGE-ME: database.schema holding the control tables
+full_threshold_bytes = 107374182400         # 100 GiB: at or below this, one COPY for the whole table
+target_chunk_bytes = 80530636800            # 75 GiB: target size of one chunk for larger tables
+max_file_size_bytes = 1073741824            # 1 GiB Parquet part files
+unmatched_token_threshold = 0               # restricted zone: max non-null tokens with no xref match per chunk
+
+[xref]
+table = "SECURE.PUBLIC.TOKEN_XREF"          # CHANGE-ME: fully qualified name
+token_column = "TOKEN_VALUE"                # CHANGE-ME
+clear_column = "CLEAR_VALUE"                # CHANGE-ME
+
+# One zone per sensitivity class. The stage URL must be s3://<bucket>/<prefix>/.
+[zones.INTERNAL]
+stage = "MIGRATION.CONTROL.EGRESS_INTERNAL_STAGE"
+bucket = "CHANGE-ME-egress"
+prefix = "internal"
+role = "MIG_INTERNAL_EXTRACT"
+
+[zones.PII]
+stage = "MIGRATION.CONTROL.EGRESS_PII_STAGE"
+bucket = "CHANGE-ME-egress"
+prefix = "pii"
+role = "MIG_PII_EXTRACT"
+
+[zones.RESTRICTED]
+stage = "MIGRATION.CONTROL.EGRESS_RESTRICTED_STAGE"
+bucket = "CHANGE-ME-egress-restricted"
+prefix = "restricted"
+role = "MIG_RESTRICTED_EXTRACT"                    # the only role with SELECT on the xref
+
+# One lane per Step Functions execution, each with its own warehouse.
+[lanes.LARGE]
+warehouse = "MIG_LARGE_WH"
+max_concurrency = 8
+
+[lanes.SMALL]
+warehouse = "MIG_SMALL_WH"
+max_concurrency = 32
+
+[lanes.RESTRICTED]
+warehouse = "MIG_RESTRICTED_WH"
+max_concurrency = 4
