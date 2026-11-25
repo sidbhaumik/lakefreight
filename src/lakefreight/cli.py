@@ -2,18 +2,50 @@
 
 lakefreight plan --metadata tables.csv [--profiles months.csv] [--out generated]
 lakefreight register --format delta|iceberg --table-root s3://bucket/zone/DB/SCHEMA/TABLE
+lakefreight config [--write lakefreight.toml]
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 from . import generate, register
+from .config import LOCAL_NAME, config_source, default_config_text
+
+
+def config_command(argv: list[str], prog: str | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog=prog, description="Show which settings file is used, or write a copy to edit"
+    )
+    parser.add_argument(
+        "--write",
+        nargs="?",
+        const=LOCAL_NAME,
+        metavar="PATH",
+        help=f"write the default settings to PATH (default: {LOCAL_NAME})",
+    )
+    args = parser.parse_args(argv)
+    if args.write:
+        target = Path(args.write)
+        if target.exists():
+            print(f"lakefreight config: {target} already exists", file=sys.stderr)
+            return 1
+        target.write_text(default_config_text(), encoding="utf-8")
+        print(f"wrote {target}; edit the CHANGE-ME values")
+        return 0
+    source = config_source()
+    print(f"# settings in use: {source or 'built-in defaults'}")
+    print(source.read_text(encoding="utf-8") if source else default_config_text(), end="")
+    return 0
+
 
 COMMANDS = {
     "plan": (generate.main, "Generate extract SQL and a work-item list from a metadata CSV"),
     "register": (register.main, "Register unloaded Parquet files as a Delta or Iceberg table"),
+    "config": (config_command, "Show the settings in use, or write a copy to edit"),
 }
 
 

@@ -28,7 +28,7 @@ SELECT
 FROM <METADATA_TABLE> m;
 
 -- Tables. Zone rules fail closed: only an explicit N/N is INTERNAL.
--- 107374182400 = full_threshold_bytes in config/defaults.toml.
+-- 107374182400 = full_threshold_bytes in lakefreight.toml (the default).
 INSERT INTO EXTRACT_CONFIG
     (DATABASE_NAME, SCHEMA_NAME, TABLE_NAME, TABLE_BYTES, ZONE, STRATEGY, LANE)
 WITH t AS (

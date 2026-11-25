@@ -10,7 +10,12 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 - `delta` and `iceberg` install extras.
 - Manifests record `chunks_in_table` and `written_at`, so readers can check completeness and choose between reruns.
 
+- `lakefreight config` shows the settings in use and writes an editable `lakefreight.toml`.
+- Packaging for PyPI: default settings, templates and `py.typed` ship in the wheel, and a release workflow publishes with trusted publishing.
+
 ### Changed
+
+- Default settings ship inside the package. Settings are read from `--config`, then `$LAKEFREIGHT_CONFIG`, then `./lakefreight.toml`, then the built-in defaults. The repository's `config/defaults.toml` is gone.
 
 - Timestamp columns are unloaded at microsecond precision (`TIMESTAMP_NTZ(6)`), and `TIME` columns as text, so Spark, Databricks and Iceberg v2 can read the files.
 

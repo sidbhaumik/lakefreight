@@ -1,8 +1,9 @@
 # lakefreight
 
 [![CI](https://github.com/sidbhaumik/lakefreight/actions/workflows/ci.yml/badge.svg)](https://github.com/sidbhaumik/lakefreight/actions/workflows/ci.yml)
-[![Python 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)](pyproject.toml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/lakefreight)](https://pypi.org/project/lakefreight/)
+[![Python 3.11 | 3.12 | 3.13 | 3.14](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://github.com/sidbhaumik/lakefreight/blob/main/pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/sidbhaumik/lakefreight/blob/main/LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230)](https://github.com/astral-sh/ruff)
 
 **Bulk-move warehouse tables into open lakehouse files on cloud storage, so any engine can read them.**
@@ -26,20 +27,7 @@ It is built for the hard version of the job: thousands of tables, petabytes of d
 
 ## What it does
 
-```mermaid
-flowchart LR
-    M[Metadata table<br/>tables, columns, sizes,<br/>PII and restricted flags] --> P[Chunk planner]
-    P --> W[(Work items)]
-    W --> SF[Step Functions<br/>one lane per size/sensitivity]
-    SF --> C[COPY INTO as Parquet]
-    C --> INTERNAL[S3 egress: INTERNAL]
-    C --> PII[S3 egress: PII]
-    C --> RESTRICTED[S3 egress: RESTRICTED]
-    INTERNAL & PII & RESTRICTED --> R{Row counts<br/>reconcile?}
-    R -- yes --> MF[Write manifest]
-    R -- no --> F[Mark failed, retry]
-    MF --> X[S3 replication to<br/>target account]
-```
+![lakefreight architecture: metadata drives a chunk planner and work items; Snowflake unloads Parquet into sensitivity zones; reconciled chunks get a manifest, are replicated to the target account, and are registered as Delta Lake or Iceberg tables](https://raw.githubusercontent.com/sidbhaumik/lakefreight/main/docs/architecture.svg)
 
 - **Generates extract SQL from metadata.** One `COPY INTO` per table, or per date chunk for large tables. Nothing is hand-written.
 - **Routes by sensitivity.** Three zones, each with its own stage, bucket location, key and role:
@@ -54,9 +42,31 @@ flowchart LR
 - **Restarts at chunk level.** Every table or chunk is a tracked work item.
 - **Registers open table formats.** `lakefreight register` turns a table's unloaded files into a Delta Lake or Apache Iceberg table without rewriting them. Only files named in a committed manifest are included; it refuses incomplete tables, files still replicating, schema drift between chunks, and nanosecond timestamps that Spark and Iceberg v2 can't read.
 
+## Install
+
+```bash
+pip install lakefreight
+```
+
+Add the extra for the table format you want to register:
+
+```bash
+pip install "lakefreight[delta]"
+```
+
+```bash
+pip install "lakefreight[iceberg]"
+```
+
+Then create a settings file to edit, and run `lakefreight --help` for the commands:
+
+```bash
+lakefreight config --write
+```
+
 ## Try it in two minutes
 
-No Snowflake or AWS account needed. This generates extract SQL for five sample tables from a fictional travel company:
+No Snowflake or AWS account needed. Clone the repo for the sample data; this generates extract SQL for five sample tables from a fictional travel company:
 
 ```bash
 git clone https://github.com/sidbhaumik/lakefreight.git
@@ -98,12 +108,12 @@ Run the tests:
 
 | Document | Read it when |
 |---|---|
-| [Migration guide](docs/migration-guide.md) | You have a migration like this to run and want the method, step by step |
-| [Design decisions](docs/design-decisions.md) | You want to know why it is built this way, and what was rejected |
+| [Migration guide](https://github.com/sidbhaumik/lakefreight/blob/main/docs/migration-guide.md) | You have a migration like this to run and want the method, step by step |
+| [Design decisions](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md) | You want to know why it is built this way, and what was rejected |
 
 ## Claude skill
 
-The repo includes a [Claude Code skill](.claude/skills/generate-extract-sql/SKILL.md) that drives the generator. Open the repo in Claude Code and ask, for example, "generate extract SQL for the tables in my_metadata.csv". Claude normalizes the file, runs the generator, and reports which tables need a decision.
+The repo includes a [Claude Code skill](https://github.com/sidbhaumik/lakefreight/blob/main/.claude/skills/generate-extract-sql/SKILL.md) that drives the generator. Open the repo in Claude Code and ask, for example, "generate extract SQL for the tables in my_metadata.csv". Claude normalizes the file, runs the generator, and reports which tables need a decision.
 
 ## Repository layout
 
@@ -120,7 +130,7 @@ The repo includes a [Claude Code skill](.claude/skills/generate-extract-sql/SKIL
 | `src/lakefreight/register.py` | `lakefreight register`: Delta Lake or Iceberg metadata over the unloaded files |
 | `stepfunctions/extract_lane.asl.json` | State machine, one execution per lane |
 | `sql/ddl/` | Control tables and the script that seeds them from metadata |
-| `config/defaults.toml` | Thresholds, zones, lanes, xref names |
+| `src/lakefreight/defaults.toml` | Default settings: thresholds, zones, lanes, xref names. `lakefreight config --write` makes an editable copy |
 | `examples/` | Sample metadata and month profiles |
 | `.claude/skills/` | The Claude skill |
 
@@ -133,8 +143,8 @@ The repo includes a [Claude Code skill](.claude/skills/generate-extract-sql/SKIL
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+See [CONTRIBUTING.md](https://github.com/sidbhaumik/lakefreight/blob/main/CONTRIBUTING.md). Changes are listed in [CHANGELOG.md](https://github.com/sidbhaumik/lakefreight/blob/main/CHANGELOG.md).
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/sidbhaumik/lakefreight/blob/main/LICENSE)

@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1150 430" width="1150" height="430" role="img" aria-labelledby="title desc">
+  <title id="title">lakefreight architecture</title>
+  <desc id="desc">Metadata drives a chunk planner that creates work items. Step Functions runs them in lanes; Snowflake unloads Parquet into three sensitivity zones. Each chunk is reconciled; passing chunks get a manifest, are replicated to the target account, and are registered as Delta Lake or Iceberg tables for Databricks, Snowflake, Redshift and BigQuery. Failing chunks are marked failed and retried.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#57606a"/>
+    </marker>
+    <style>
+      .box { fill: #f6f8fa; stroke: #57606a; stroke-width: 1.5; }
+      .zone { fill: #ddf4ff; stroke: #0969da; stroke-width: 1.5; }
+      .ok { fill: #dafbe1; stroke: #1a7f37; stroke-width: 1.5; }
+      .bad { fill: #ffebe9; stroke: #cf222e; stroke-width: 1.5; }
+      .t { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 14px; fill: #1f2328; text-anchor: middle; }
+      .s { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 12px; fill: #57606a; text-anchor: middle; }
+      .b { font-weight: 600; }
+      .line { stroke: #57606a; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1150" height="430" fill="#ffffff"/>
+
+  <!-- Row 1: plan and unload, left to right -->
+  <rect class="box" x="20" y="30" width="190" height="76" rx="8"/>
+  <text class="t b" x="115" y="60">Metadata table</text>
+  <text class="s" x="115" y="80">columns, sizes,</text>
+  <text class="s" x="115" y="96">PII and restricted flags</text>
+
+  <rect class="box" x="250" y="30" width="190" height="76" rx="8"/>
+  <text class="t b" x="345" y="62">Chunk planner</text>
+  <text class="s" x="345" y="84">even, gap-free date chunks</text>
+
+  <rect class="box" x="480" y="30" width="190" height="76" rx="8"/>
+  <text class="t b" x="575" y="62">Work items</text>
+  <text class="s" x="575" y="84">one per table or chunk</text>
+
+  <rect class="box" x="710" y="30" width="190" height="76" rx="8"/>
+  <text class="t b" x="805" y="62">Step Functions</text>
+  <text class="s" x="805" y="84">lanes by size and sensitivity</text>
+
+  <rect class="box" x="940" y="30" width="190" height="76" rx="8"/>
+  <text class="t b" x="1035" y="62">COPY INTO</text>
+  <text class="s" x="1035" y="84">Snowflake writes Parquet</text>
+
+  <path class="line" d="M210,68 H248"/>
+  <path class="line" d="M440,68 H478"/>
+  <path class="line" d="M670,68 H708"/>
+  <path class="line" d="M900,68 H938"/>
+  <path class="line" d="M1035,106 V158"/>
+
+  <!-- Row 2: verify and hand off, right to left -->
+  <rect class="zone" x="940" y="160" width="190" height="96" rx="8"/>
+  <text class="t b" x="1035" y="186">S3 egress zones</text>
+  <text class="s" x="1035" y="208">RESTRICTED</text>
+  <text class="s" x="1035" y="225">PII</text>
+  <text class="s" x="1035" y="242">INTERNAL</text>
+
+  <rect class="box" x="710" y="170" width="190" height="76" rx="8"/>
+  <text class="t b" x="805" y="202">Reconcile</text>
+  <text class="s" x="805" y="224">rows unloaded = source rows?</text>
+
+  <rect class="ok" x="480" y="170" width="190" height="76" rx="8"/>
+  <text class="t b" x="575" y="202">Write manifest</text>
+  <text class="s" x="575" y="224">the commit marker</text>
+
+  <rect class="box" x="250" y="170" width="190" height="76" rx="8"/>
+  <text class="t b" x="345" y="202">S3 replication</text>
+  <text class="s" x="345" y="224">to the target account</text>
+
+  <rect class="box" x="20" y="170" width="190" height="76" rx="8"/>
+  <text class="t b" x="115" y="202">lakefreight register</text>
+  <text class="s" x="115" y="224">Delta Lake or Iceberg</text>
+
+  <path class="line" d="M940,208 H902"/>
+  <path class="line" d="M710,208 H672"/>
+  <text class="s" x="691" y="198">yes</text>
+  <path class="line" d="M480,208 H442"/>
+  <path class="line" d="M250,208 H212"/>
+
+  <!-- Failure branch -->
+  <rect class="bad" x="710" y="300" width="190" height="60" rx="8"/>
+  <text class="t b" x="805" y="326">Mark failed</text>
+  <text class="s" x="805" y="346">retried on the next run</text>
+  <path class="line" d="M805,246 V298"/>
+  <text class="s" x="822" y="276">no</text>
+
+  <!-- Readers -->
+  <rect class="box" x="20" y="300" width="420" height="60" rx="8"/>
+  <text class="t b" x="230" y="326">Any engine reads the tables</text>
+  <text class="s" x="230" y="346">Databricks · Snowflake · Redshift · BigQuery</text>
+  <path class="line" d="M115,246 V298"/>
+
+  <text class="s" x="575" y="410">Files without a manifest, such as failed attempts, are never released or registered.</text>
+</svg>

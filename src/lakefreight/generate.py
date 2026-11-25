@@ -278,7 +278,10 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
     parser.add_argument("--metadata", required=True, help="metadata CSV, one row per column")
     parser.add_argument("--profiles", help="month profile CSV for large tables")
     parser.add_argument("--out", default="generated", help="output directory")
-    parser.add_argument("--config", help="settings TOML (default: config/defaults.toml)")
+    parser.add_argument(
+        "--config",
+        help="settings TOML (default: $LAKEFREIGHT_CONFIG, ./lakefreight.toml, or built-in defaults)",
+    )
     parser.add_argument("--run-id", default="manual", help="run id used in the unload path")
     args = parser.parse_args(argv)
 

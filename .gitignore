@@ -5,3 +5,5 @@ __pycache__/
 generated/
 .DS_Store
 .ruff_cache/
+dist/
+build/

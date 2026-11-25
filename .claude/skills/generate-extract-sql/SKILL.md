@@ -33,7 +33,7 @@ See `examples/metadata_sample.csv` for a working example.
 
 ### 2. Check the settings
 
-`config/defaults.toml` holds the stage per zone, the xref table and its column names, the size threshold for chunking and the target chunk size. Values marked `CHANGE-ME` are placeholders. Ask the user for real values if the SQL is going to be run; for a dry run or a review, the placeholders are fine, and say so in your summary.
+The settings file holds the stage per zone, the xref table and its column names, the size threshold for chunking and the target chunk size. `lakefreight config` shows which file is in use; `lakefreight config --write` creates an editable `lakefreight.toml` in the current folder. Values marked `CHANGE-ME` are placeholders. Ask the user for real values if the SQL is going to be run; for a dry run or a review, the placeholders are fine, and say so in your summary.
 
 ### 3. Run the generator
 

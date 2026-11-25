@@ -43,6 +43,16 @@ These are deliberate. Please don't change them without opening an issue first; [
 - Joins that replace values use `LEFT JOIN`, and reconciliation counts come from the un-joined source.
 - A manifest is written only after reconciliation passes.
 
+## Releasing
+
+Maintainers only. Releases are published to PyPI by GitHub Actions using trusted publishing.
+
+1. Move the `[Unreleased]` entries in `CHANGELOG.md` under a new version heading with today's date, and update the comparison links at the bottom.
+2. Set the same version in `pyproject.toml`.
+3. Merge to `main` and wait for CI to pass.
+4. Optional: run the Release workflow by hand to publish to TestPyPI and check the result.
+5. Create a GitHub release with the tag `v<version>`. Publishing the release uploads the package to PyPI. The workflow refuses a tag that doesn't match the version in `pyproject.toml`.
+
 ## Reporting a bug
 
 Open an issue with the command you ran, a minimal metadata CSV that reproduces the problem, what you expected, and what happened. Remove any real table names or data first.

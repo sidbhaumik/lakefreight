@@ -1,5 +1,5 @@
 -- Control tables for the migration. Run once in the control schema.
--- Replace MIGRATION.CONTROL if config/defaults.toml uses a different control_schema.
+-- Replace MIGRATION.CONTROL if your lakefreight.toml uses a different control_schema.
 
 CREATE SCHEMA IF NOT EXISTS MIGRATION.CONTROL;
 USE SCHEMA MIGRATION.CONTROL;
