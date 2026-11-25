@@ -4,6 +4,8 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-25
+
 ### Added
 
 - `lakefreight discover`: builds the metadata CSV from Snowflake's `ACCOUNT_USAGE` or `INFORMATION_SCHEMA` views. Personal-data flags come from Snowflake's sensitive data classification, your own tags and column-name patterns; restricted flags from your tags and patterns. Columns in tables Snowflake has never classified are left unknown, so their tables go to the PII zone. `--sql-only` prints the query to run yourself.
@@ -44,6 +46,7 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sidbhaumik/lakefreight/releases/tag/v0.1.0
