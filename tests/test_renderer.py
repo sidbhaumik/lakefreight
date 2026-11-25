@@ -35,7 +35,11 @@ def test_restricted_unload_left_joins_xref_once_per_restricted_column():
         ColumnSpec("ALT_PASSPORT_NO", "VARCHAR", use_xref=True),
     )
     sql = renderer.unload_sql(
-        table("RESTRICTED", cols), """t."TXN_DT" < '2020-01-01'""", "0001_201901_201912", "r", settings
+        table("RESTRICTED", cols),
+        """t."TXN_DT" < '2020-01-01'""",
+        "0001_201901_201912",
+        "r",
+        settings,
     )
     assert "@MIGRATION.CONTROL.EGRESS_RESTRICTED_STAGE/" in sql
     assert sql.count("LEFT JOIN SECURE.PUBLIC.TOKEN_XREF") == 2
@@ -66,7 +70,10 @@ def test_count_and_unmatched_sql():
         'SELECT COUNT(*) FROM "SALES"."PUBLIC"."ORDERS" t WHERE t."D" IS NULL'
     )
     unmatched = renderer.unmatched_sql(t, pred, settings)
-    assert '(t."D" IS NULL) AND ((t."PASSPORT_NO" IS NOT NULL AND x1."TOKEN_VALUE" IS NULL))' in unmatched
+    assert (
+        '(t."D" IS NULL) AND ((t."PASSPORT_NO" IS NOT NULL AND x1."TOKEN_VALUE" IS NULL))'
+        in unmatched
+    )
     assert renderer.unmatched_sql(table(), None, settings) is None
 
 
@@ -86,7 +93,7 @@ def test_zone_fails_closed():
 
 def test_reconcile_rules():
     assert evaluate(100, 100, None, 0) == (True, None)
-    assert evaluate(99, 100, None, 0)[0] is False   # rows dropped
-    assert evaluate(101, 100, 0, 0)[0] is False     # rows duplicated by the join
-    assert evaluate(100, 100, 5, 0)[0] is False     # unmatched tokens
+    assert evaluate(99, 100, None, 0)[0] is False  # rows dropped
+    assert evaluate(101, 100, 0, 0)[0] is False  # rows duplicated by the join
+    assert evaluate(100, 100, 5, 0)[0] is False  # unmatched tokens
     assert evaluate(100, 100, 5, 10)[0] is True

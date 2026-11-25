@@ -23,14 +23,30 @@ from .config import Settings, load_settings
 from .models import ColumnSpec, TableSpec, resolve_zone
 
 REQUIRED = {
-    "table_database", "table_schema", "table_name", "table_size_bytes",
-    "table_pii_flag", "table_restricted_flag",
-    "column_name", "column_datatype", "column_pii_flag", "column_restricted_flag",
+    "table_database",
+    "table_schema",
+    "table_name",
+    "table_size_bytes",
+    "table_pii_flag",
+    "table_restricted_flag",
+    "column_name",
+    "column_datatype",
+    "column_pii_flag",
+    "column_restricted_flag",
 }
 OPTIONAL = {"column_ordinal", "column_length", "column_description", "chunk_column"}
 SUMMARY_FIELDS = [
-    "database", "schema", "table", "zone", "lane", "strategy", "chunk_id",
-    "est_bytes", "status", "file", "notes",
+    "database",
+    "schema",
+    "table",
+    "zone",
+    "lane",
+    "strategy",
+    "chunk_id",
+    "est_bytes",
+    "status",
+    "file",
+    "notes",
 ]
 
 
@@ -180,15 +196,25 @@ def generate(
         chunked = meta.table_bytes > settings.full_threshold_bytes
         lane = "RESTRICTED" if spec.zone == "RESTRICTED" else ("LARGE" if chunked else "SMALL")
         base = dict(
-            database=spec.database, schema=spec.schema, table=spec.table, zone=spec.zone,
-            lane=lane, strategy="CHUNKED" if chunked else "FULL",
+            database=spec.database,
+            schema=spec.schema,
+            table=spec.table,
+            zone=spec.zone,
+            lane=lane,
+            strategy="CHUNKED" if chunked else "FULL",
         )
         rel_dir = Path(spec.zone) / ".".join(key)
 
-        def row(chunk_id, est_bytes, status, file, extra=()):
+        def row(chunk_id, est_bytes, status, file, extra=(), base=base, notes=notes):
             summary.append(
-                {**base, "chunk_id": chunk_id, "est_bytes": est_bytes, "status": status,
-                 "file": str(file), "notes": "; ".join([*notes, *extra])}
+                {
+                    **base,
+                    "chunk_id": chunk_id,
+                    "est_bytes": est_bytes,
+                    "status": status,
+                    "file": str(file),
+                    "notes": "; ".join([*notes, *extra]),
+                }
             )
 
         try:
@@ -199,15 +225,22 @@ def generate(
                     f"-- Run this, save the result, and pass it with --profiles.\n"
                     f"{chunk_planner.profile_sql(spec.source_fqn, meta.chunk_column)};\n"
                 )
-                row("", meta.table_bytes, "NEEDS_PROFILE", rel_dir / "profile.sql",
-                    [f"chunk column {meta.chunk_column}: confirm it prunes before using it"])
+                row(
+                    "",
+                    meta.table_bytes,
+                    "NEEDS_PROFILE",
+                    rel_dir / "profile.sql",
+                    [f"chunk column {meta.chunk_column}: confirm it prunes before using it"],
+                )
                 continue
 
             if chunked and meta.chunk_column:
                 chunks = chunk_planner.plan_chunks(
                     meta.chunk_column, profiles[key], meta.table_bytes, settings.target_chunk_bytes
                 )
-                big = {c.chunk_id for c in chunk_planner.oversized(chunks, settings.target_chunk_bytes)}
+                big = {
+                    c.chunk_id for c in chunk_planner.oversized(chunks, settings.target_chunk_bytes)
+                }
             else:
                 chunks, big = [chunk_planner.full_chunk(meta.table_bytes)], set()
                 if chunked:
@@ -217,8 +250,18 @@ def generate(
                 target = out_dir / rel_dir / f"{chunk.chunk_id}.sql"
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(_statements(meta, chunk, run_id, settings))
-                extra = ["far above target size; consider a finer split"] if chunk.chunk_id in big else []
-                row(chunk.chunk_id, chunk.est_bytes, "READY", rel_dir / f"{chunk.chunk_id}.sql", extra)
+                extra = (
+                    ["far above target size; consider a finer split"]
+                    if chunk.chunk_id in big
+                    else []
+                )
+                row(
+                    chunk.chunk_id,
+                    chunk.est_bytes,
+                    "READY",
+                    rel_dir / f"{chunk.chunk_id}.sql",
+                    extra,
+                )
         except ValueError as exc:
             row("", meta.table_bytes, "ERROR", "", [str(exc)])
 
@@ -248,7 +291,9 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
     by_zone = Counter(r["zone"] for r in summary if r["status"] == "READY")
     print(f"{len(tables)} tables -> {len(summary)} work items in {args.out}/")
     print("  status: " + ", ".join(f"{k} {v}" for k, v in sorted(by_status.items())))
-    print("  ready by zone: " + (", ".join(f"{k} {v}" for k, v in sorted(by_zone.items())) or "none"))
+    print(
+        "  ready by zone: " + (", ".join(f"{k} {v}" for k, v in sorted(by_zone.items())) or "none")
+    )
     flagged = [r for r in summary if r["notes"]]
     seen = set()
     for r in flagged:

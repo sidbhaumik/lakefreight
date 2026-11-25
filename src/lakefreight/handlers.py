@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from . import reconcile as rules
 from . import renderer
@@ -53,7 +53,7 @@ def list_items(event, _context=None):
     finally:
         conn.close()
     bucket = os.environ["ITEMS_BUCKET"]
-    key = f"runs/{lane}/{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.json"
+    key = f"runs/{lane}/{datetime.now(UTC):%Y%m%dT%H%M%SZ}.json"
     _s3().put_object(Bucket=bucket, Key=key, Body=json.dumps(items).encode())
     return {
         "lane": lane,
@@ -84,15 +84,23 @@ def submit(event, _context=None):
     cur.execute_async(sql)
     query_id = cur.sfqid
     update_work_item(
-        cur, settings, work_item_id,
-        STATUS="RUNNING", RUN_ID=run_id, QUERY_ID=query_id,
-        SNAPSHOT_TS=datetime.now(timezone.utc).replace(tzinfo=None),
-        ATTEMPTS=int(item["ATTEMPTS"] or 0) + 1, LAST_ERROR=None,
+        cur,
+        settings,
+        work_item_id,
+        STATUS="RUNNING",
+        RUN_ID=run_id,
+        QUERY_ID=query_id,
+        SNAPSHOT_TS=datetime.now(UTC).replace(tzinfo=None),
+        ATTEMPTS=int(item["ATTEMPTS"] or 0) + 1,
+        LAST_ERROR=None,
     )
     # The connection is deliberately not closed: see README, "Verify in the pilot".
     return {
-        "work_item_id": work_item_id, "query_id": query_id, "run_id": run_id,
-        "zone": item["ZONE"], "lane": item["LANE"],
+        "work_item_id": work_item_id,
+        "query_id": query_id,
+        "run_id": run_id,
+        "zone": item["ZONE"],
+        "lane": item["LANE"],
     }
 
 
@@ -109,8 +117,11 @@ def poll(event, _context=None):
         else:
             state = "FAILED"
             update_work_item(
-                conn.cursor(), settings, event["work_item_id"],
-                STATUS="FAILED", LAST_ERROR=f"COPY ended with status {status.name}",
+                conn.cursor(),
+                settings,
+                event["work_item_id"],
+                STATUS="FAILED",
+                LAST_ERROR=f"COPY ended with status {status.name}",
             )
     finally:
         conn.close()
@@ -134,7 +145,7 @@ def reconcile(event, _context=None):
         cols = [d[0].upper() for d in cur.description]
         files = [
             {"name": r["FILE_NAME"], "size": int(r["FILE_SIZE"]), "rows": int(r["ROW_COUNT"])}
-            for r in (dict(zip(cols, row)) for row in cur.fetchall())
+            for r in (dict(zip(cols, row, strict=True)) for row in cur.fetchall())
         ]
         rows_unloaded = sum(f["rows"] for f in files)
 
@@ -151,22 +162,33 @@ def reconcile(event, _context=None):
             rows_unloaded, source_rows, unmatched, settings.unmatched_token_threshold
         )
         counts = dict(
-            ROWS_UNLOADED=rows_unloaded, SOURCE_ROWS=source_rows, FILE_COUNT=len(files),
-            BYTES_UNLOADED=sum(f["size"] for f in files), UNMATCHED_TOKENS=unmatched,
+            ROWS_UNLOADED=rows_unloaded,
+            SOURCE_ROWS=source_rows,
+            FILE_COUNT=len(files),
+            BYTES_UNLOADED=sum(f["size"] for f in files),
+            UNMATCHED_TOKENS=unmatched,
         )
         if not ok:
-            update_work_item(cur, settings, work_item_id, STATUS="FAILED", LAST_ERROR=reason, **counts)
+            update_work_item(
+                cur, settings, work_item_id, STATUS="FAILED", LAST_ERROR=reason, **counts
+            )
             return {**event, "state": "FAILED", "reason": reason}
 
         zone = settings.zones[table.zone]
         base = f"{zone.prefix}/{table.path}"
         manifest = rules.build_manifest(
-            table, item["CHUNK_ID"], event["run_id"], item["PREDICATE"],
-            str(item["SNAPSHOT_TS"]) if item["SNAPSHOT_TS"] else None, files, rows_unloaded,
+            table,
+            item["CHUNK_ID"],
+            event["run_id"],
+            item["PREDICATE"],
+            str(item["SNAPSHOT_TS"]) if item["SNAPSHOT_TS"] else None,
+            files,
+            rows_unloaded,
         )
         s3 = _s3()
         s3.put_object(
-            Bucket=zone.bucket, Key=f"{base}/_schema.json",
+            Bucket=zone.bucket,
+            Key=f"{base}/_schema.json",
             Body=json.dumps(rules.build_schema(table), indent=2).encode(),
         )
         # The manifest is the commit marker: written last.

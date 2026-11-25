@@ -1,6 +1,6 @@
 """lakefreight command line.
 
-    lakefreight plan --metadata tables.csv [--profiles months.csv] [--out generated]
+lakefreight plan --metadata tables.csv [--profiles months.csv] [--out generated]
 """
 
 from __future__ import annotations

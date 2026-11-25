@@ -28,7 +28,17 @@ def build_work_items(conn, settings: Settings) -> int:
         "    AND w.TABLE_NAME = c.TABLE_NAME)"
     )
     created = 0
-    for db, schema, table, table_bytes, zone, lane, strategy, chunk_col, source_db in cur.fetchall():
+    for (
+        db,
+        schema,
+        table,
+        table_bytes,
+        zone,
+        lane,
+        strategy,
+        chunk_col,
+        source_db,
+    ) in cur.fetchall():
         table_bytes = int(table_bytes or 0)
         if strategy == "CHUNKED" and chunk_col:
             fqn = ".".join(quote_ident(p) for p in (source_db or db, schema, table))
@@ -44,8 +54,17 @@ def build_work_items(conn, settings: Settings) -> int:
             "(WORK_ITEM_ID, DATABASE_NAME, SCHEMA_NAME, TABLE_NAME, CHUNK_ID, PREDICATE, "
             "ZONE, LANE, EST_BYTES) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
             [
-                (f"{db}.{schema}.{table}#{c.chunk_id}", db, schema, table, c.chunk_id,
-                 c.predicate, zone, lane, c.est_bytes)
+                (
+                    f"{db}.{schema}.{table}#{c.chunk_id}",
+                    db,
+                    schema,
+                    table,
+                    c.chunk_id,
+                    c.predicate,
+                    zone,
+                    lane,
+                    c.est_bytes,
+                )
                 for c in chunks
             ],
         )

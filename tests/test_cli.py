@@ -14,7 +14,13 @@ def test_help_and_unknown_command(capsys):
 
 def test_plan_writes_work_items(tmp_path):
     code = cli.main(
-        ["plan", "--metadata", str(ROOT / "examples" / "metadata_sample.csv"), "--out", str(tmp_path)]
+        [
+            "plan",
+            "--metadata",
+            str(ROOT / "examples" / "metadata_sample.csv"),
+            "--out",
+            str(tmp_path),
+        ]
     )
     assert code == 0
     assert (tmp_path / "work_items.csv").exists()

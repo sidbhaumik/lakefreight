@@ -1,5 +1,10 @@
 # lakefreight
 
+[![CI](https://github.com/sidbhaumik/lakefreight/actions/workflows/ci.yml/badge.svg)](https://github.com/sidbhaumik/lakefreight/actions/workflows/ci.yml)
+[![Python 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230)](https://github.com/astral-sh/ruff)
+
 **Bulk-move warehouse tables into open lakehouse files on cloud storage, so any engine can read them.**
 
 lakefreight unloads thousands of tables from a source warehouse into Parquet files on object storage, in a layout that Databricks, Snowflake, Redshift and BigQuery can all load or query. It plans the work from your metadata, keeps sensitive data in separate zones, and reconciles every extract before it is released.
@@ -115,3 +120,11 @@ The repo includes a [Claude Code skill](.claude/skills/generate-extract-sql/SKIL
 - Infrastructure as code: buckets, KMS keys, replication rules, stages, storage integrations, IAM, Lambda packaging.
 - A single-pass `PARTITION BY` unload for large tables with no date column.
 - Replication tracking, egress purge, and the delta pass for tables that change during the migration.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+[MIT](LICENSE)

@@ -33,7 +33,7 @@ def get_work_item(cur, settings: Settings, work_item_id: str) -> dict:
     row = cur.fetchone()
     if row is None:
         raise KeyError(f"work item not found: {work_item_id}")
-    return dict(zip([d[0] for d in cur.description], row))
+    return dict(zip([d[0] for d in cur.description], row, strict=True))
 
 
 def update_work_item(cur, settings: Settings, work_item_id: str, **fields) -> None:
@@ -65,8 +65,13 @@ def load_table_spec(cur, settings: Settings, database: str, schema: str, table: 
     )
     columns = tuple(
         ColumnSpec(
-            name=r[0], data_type=r[1], use_xref=bool(r[2]), length=r[3],
-            description=r[4], pii_flag=r[5], restricted_flag=r[6],
+            name=r[0],
+            data_type=r[1],
+            use_xref=bool(r[2]),
+            length=r[3],
+            description=r[4],
+            pii_flag=r[5],
+            restricted_flag=r[6],
         )
         for r in cur.fetchall()
     )

@@ -4,3 +4,4 @@ __pycache__/
 *.egg-info/
 generated/
 .DS_Store
+.ruff_cache/
