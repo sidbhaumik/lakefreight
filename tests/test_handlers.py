@@ -101,3 +101,57 @@ def test_row_mismatch_fails_and_writes_no_manifest(monkeypatch):
     out, written = run(monkeypatch, [("data_0_0_0.snappy.parquet", 1000, 10)], 11)
     assert out["state"] == "FAILED"
     assert not any(k.endswith("manifest.json") for k in written)
+
+
+class SummaryCursor:
+    def __init__(self, rows):
+        self.rows, self.params = rows, None
+
+    def execute(self, sql, params=None):
+        self.params = params
+
+    def fetchall(self):
+        return self.rows
+
+
+def summarize(monkeypatch, ids, status_rows):
+    cur = SummaryCursor(status_rows)
+    body = json.dumps([{"work_item_id": i} for i in ids]).encode()
+    monkeypatch.setattr(handlers, "_connect_for", lambda *a: FakeConn(cur))
+    monkeypatch.setattr(
+        handlers,
+        "_s3",
+        lambda: type(
+            "S3",
+            (),
+            {"get_object": lambda self, **kw: {"Body": type("B", (), {"read": lambda s: body})()}},
+        )(),
+    )
+    event = {"lane": "SMALL", "count": len(ids), "items": {"bucket": "b", "key": "k"}}
+    return handlers.summarize(event), cur
+
+
+def test_summarize_counts_items_not_reconciled(monkeypatch):
+    # Found in the live AWS run: every item failed, yet the lane reported success.
+    out, cur = summarize(monkeypatch, ["a", "b", "c"], [("RECONCILED", 1), ("FAILED", 2)])
+    assert out["not_reconciled"] == 2 and out["statuses"] == {"RECONCILED": 1, "FAILED": 2}
+    assert json.loads(cur.params[0]) == ["a", "b", "c"]
+
+
+def test_summarize_all_reconciled(monkeypatch):
+    out, _ = summarize(monkeypatch, ["a", "b"], [("RECONCILED", 2)])
+    assert out["not_reconciled"] == 0
+
+
+def test_state_machine_fails_lane_with_unreconciled_items():
+    from pathlib import Path
+
+    asl = json.loads(
+        (Path(__file__).parent.parent / "stepfunctions" / "extract_lane.asl.json").read_text()
+    )
+    states = asl["States"]
+    assert states["ExtractItems"]["ResultPath"] is None  # keep list_items' output for Summarize
+    assert states["ExtractItems"]["Next"] == "Summarize"
+    choice = states["AllReconciled"]
+    assert choice["Choices"][0]["Variable"] == "$.not_reconciled"
+    assert states[choice["Default"]]["Type"] == "Fail"

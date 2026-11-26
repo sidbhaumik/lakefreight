@@ -48,6 +48,7 @@
       },
       "MaxConcurrencyPath": "$.max_concurrency",
       "ToleratedFailurePercentage": 100,
+      "ResultPath": null,
       "ItemProcessor": {
         "ProcessorConfig": {
           "Mode": "DISTRIBUTED",
@@ -143,7 +144,44 @@
           }
         }
       },
-      "End": true
+      "Next": "Summarize"
+    },
+    "Summarize": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${SummarizeFunctionArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 10,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "AllReconciled"
+    },
+    "AllReconciled": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.not_reconciled",
+          "NumericEquals": 0,
+          "Next": "LaneDone"
+        }
+      ],
+      "Default": "LaneHadFailures"
+    },
+    "LaneDone": {
+      "Type": "Succeed"
+    },
+    "LaneHadFailures": {
+      "Type": "Fail",
+      "Error": "LaneHadFailures",
+      "Cause": "Some work items did not reconcile. See STATUS and LAST_ERROR in EXTRACT_WORK_ITEM; rerun the lane to retry them."
     }
   }
 }

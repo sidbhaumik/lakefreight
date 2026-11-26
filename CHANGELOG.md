@@ -4,6 +4,18 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+Fixes from the first live deployment to AWS.
+
+### Fixed
+
+- A lane's Step Functions execution now fails with `LaneHadFailures` when any of its work items did not reconcile. Before, it reported success even when every item failed. A new `summarize` Lambda counts the run's items by status after the Map.
+- `sql/ddl/02_seed_config.sql` takes the size threshold from a `FULL_THRESHOLD_BYTES` variable at its top, instead of a hard-coded default, and ends on a statement so it runs through the Python connector.
+
+### Changed
+
+- `infra/terraform` no longer lists the storage-integration preview feature, which provider 2.24 made stable.
+- Documentation records the live AWS deployment and a limit of AWS free-plan accounts: their managed policies stop Snowflake from assuming the zone roles. See `docs/live-validation.md`.
+
 ## [0.4.1] - 2026-11-26
 
 Fixes from the first live run on Snowflake.

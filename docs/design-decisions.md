@@ -118,7 +118,7 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 - Large tables with no date column run as one unpartitioned `COPY`; a single-pass `PARTITION BY` unload is not implemented.
 - A single month larger than twice the target chunk size is flagged but not split further.
-- `infra/terraform` has been validated and planned against the real provider schemas with mocked Snowflake and offline AWS, but never applied. IAM policies, key policies and cross-account replication need a first deployment to a test account.
+- `infra/terraform` has been applied to a live AWS account and Snowflake trial, and the Lambda functions and state machine ran end to end. Snowflake writing into S3 through the zone roles, the bucket and key policies under real writes, and cross-account replication are still untested; the test account's free plan blocked Snowflake from assuming the roles.
 - Snowflake's Parquet unload keeps timestamps only to the millisecond. Columns that need finer precision have no lossless path yet.
 - Registered tables have been read back with delta-rs, pyiceberg and DuckDB, including tables unloaded from a live Snowflake account, but not yet with Spark, Databricks, Snowflake, Redshift or BigQuery.
 - Registration creates a table once. Adding a re-extracted chunk to an existing table is not supported yet.

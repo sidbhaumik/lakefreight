@@ -158,7 +158,7 @@ The repo includes a [Claude Code skill](https://github.com/sidbhaumik/lakefreigh
 | `src/lakefreight/templates/copy_unload.sql.j2` | The `COPY INTO` template |
 | `src/lakefreight/reconcile.py` | Pass/fail rules, manifest and schema sidecar |
 | `src/lakefreight/planning.py` | Creates work items in Snowflake from the control tables |
-| `src/lakefreight/handlers.py` | Lambda handlers: list, submit, poll, reconcile |
+| `src/lakefreight/handlers.py` | Lambda handlers: list, submit, poll, reconcile, summarize |
 | `src/lakefreight/register.py` | `lakefreight register`: Delta Lake or Iceberg metadata over the unloaded files |
 | `infra/terraform/` | Terraform/OpenTofu for the AWS and Snowflake side; see `infra/README.md` |
 | `infra/build_lambda.sh` | Builds the Lambda package |

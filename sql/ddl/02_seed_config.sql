@@ -6,6 +6,16 @@
 -- (add --sql-only to print the CREATE TABLE ... AS statement instead of running it).
 -- Run this script in the control schema, like 01_control_tables.sql.
 
+-- After seeding, check:
+-- 1. CHUNKED tables with no chunk column (these fall back to a single pass):
+--    SELECT * FROM EXTRACT_CONFIG WHERE STRATEGY = 'CHUNKED' AND CHUNK_COLUMN IS NULL;
+-- 2. The xref must be unique on the token (CHANGE-ME names):
+--    SELECT TOKEN_VALUE, COUNT(*) FROM SECURE.PUBLIC.TOKEN_XREF GROUP BY 1 HAVING COUNT(*) > 1;
+
+-- Must equal full_threshold_bytes in lakefreight.toml (terraform output -raw
+-- lakefreight_toml shows it). Tables at or below it are unloaded in one COPY.
+SET FULL_THRESHOLD_BYTES = 107374182400;
+
 -- Columns. A column flagged restricted is resolved through the xref.
 INSERT INTO EXTRACT_COLUMN_CONFIG
     (DATABASE_NAME, SCHEMA_NAME, TABLE_NAME, COLUMN_NAME, ORDINAL, DATA_TYPE,
@@ -28,7 +38,6 @@ SELECT
 FROM SOURCE_METADATA m;
 
 -- Tables. Zone rules fail closed: only an explicit N/N is INTERNAL.
--- 107374182400 = full_threshold_bytes in lakefreight.toml (the default).
 INSERT INTO EXTRACT_CONFIG
     (DATABASE_NAME, SCHEMA_NAME, TABLE_NAME, TABLE_BYTES, ZONE, STRATEGY, LANE)
 WITH t AS (
@@ -47,7 +56,7 @@ WITH t AS (
             WHEN RESTRICTED_FLAG = 'N' AND PII_FLAG = 'N' THEN 'INTERNAL'
             ELSE 'PII'
         END AS ZONE,
-        IFF(TABLE_BYTES <= 107374182400, 'FULL', 'CHUNKED') AS STRATEGY
+        IFF(TABLE_BYTES <= $FULL_THRESHOLD_BYTES, 'FULL', 'CHUNKED') AS STRATEGY
     FROM t
 )
 SELECT
@@ -84,9 +93,3 @@ WHERE c.STRATEGY = 'CHUNKED'
   AND c.DATABASE_NAME = g.DATABASE_NAME
   AND c.SCHEMA_NAME = g.SCHEMA_NAME
   AND c.TABLE_NAME = g.TABLE_NAME;
-
--- Checks to run after seeding.
--- 1. CHUNKED tables with no chunk column (these fall back to a single pass):
---    SELECT * FROM EXTRACT_CONFIG WHERE STRATEGY = 'CHUNKED' AND CHUNK_COLUMN IS NULL;
--- 2. The xref must be unique on the token (CHANGE-ME names):
---    SELECT TOKEN_VALUE, COUNT(*) FROM SECURE.PUBLIC.TOKEN_XREF GROUP BY 1 HAVING COUNT(*) > 1;

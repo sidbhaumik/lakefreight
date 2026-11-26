@@ -2,7 +2,7 @@
 
 `infra/terraform` creates everything the Step Functions pipeline needs, on AWS and in Snowflake, from one configuration. It works with Terraform 1.6+ or OpenTofu.
 
-**Status:** validated and planned against the real AWS and Snowflake provider schemas, with tests that check the access policies. It has not yet been applied to a live account. Deploy to a test account first.
+**Status:** applied to a live AWS account and Snowflake trial: every resource was created and destroyed cleanly, and the Lambda functions and state machine ran end to end. Unloads into S3 could not be tested there, because the AWS account was on the free plan (see below). Deploy to a test account first; see `docs/live-validation.md`.
 
 ## What it creates
 
@@ -12,7 +12,7 @@
 | AWS | One KMS key per zone | Each zone's files are encrypted with its own key. |
 | AWS | One IAM role per zone, assumed by Snowflake | Can write only its zone's prefix and use only its zone's key. |
 | AWS | Secrets Manager secret | The service user's private key. Created empty; you fill it in. |
-| AWS | Four Lambda functions and a Step Functions state machine | Run work items: list, submit, poll, reconcile. |
+| AWS | Five Lambda functions and a Step Functions state machine | Run work items: list, submit, poll, reconcile, then summarize the lane. |
 | AWS | Control bucket | Work-item lists for each run. |
 | AWS | Optional replication role and rules | Copy each egress bucket to the receiving account. |
 | Snowflake | Control database and schema | Control tables and stages. |
@@ -27,6 +27,7 @@
 - AWS credentials allowed to create S3, KMS, IAM, Lambda, Step Functions and Secrets Manager resources.
 - A Snowflake role allowed to create databases, warehouses, roles, users and storage integrations. `ACCOUNTADMIN` works; a dedicated admin role is better.
 - Deploy in the AWS region of your Snowflake account, so unloads cross no region.
+- An AWS account that allows access from other AWS accounts. Snowflake writes to S3 by assuming the zone roles from Snowflake's own AWS account. Accounts on AWS's free plan sit in an organization whose AWS-managed policies block principals from outside it, so every unload fails with `Error assuming AWS_ROLE ... not authorized to perform: sts:AssumeRole`. Upgrade the account and activate advanced features, or use an account outside the free plan.
 
 ## Steps
 
@@ -111,7 +112,7 @@ Then load the metadata and seed the control tables:
 lakefreight discover --database SALES --database HR --table LAKEFREIGHT.CONTROL.SOURCE_METADATA
 ```
 
-Run `sql/ddl/02_seed_config.sql` in the same schema, and review the chunk columns it picked.
+Run `sql/ddl/02_seed_config.sql` in the same schema, with `FULL_THRESHOLD_BYTES` at its top set to the `full_threshold_bytes` in your settings, and review the chunk columns it picked.
 
 ### 8. Create work items and run
 
@@ -131,7 +132,7 @@ Start one execution per lane:
 aws stepfunctions start-execution --state-machine-arn "$(terraform output -raw state_machine_arn)" --input '{"lane": "SMALL"}'
 ```
 
-Repeat with `LARGE` and `RESTRICTED`. A rerun picks up only pending and failed work items. Track progress with the `EXTRACT_PROGRESS` view.
+Repeat with `LARGE` and `RESTRICTED`. Every item in the lane gets its attempt; the execution then fails with `LaneHadFailures` if any item did not reconcile. A rerun picks up only pending and failed work items. Track progress with the `EXTRACT_PROGRESS` view.
 
 ### 9. Optional: replicate to the receiving account
 

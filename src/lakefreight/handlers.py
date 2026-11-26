@@ -4,6 +4,7 @@
     submit      render and start the COPY asynchronously
     poll        check the COPY's status
     reconcile   compare counts, write the manifest, mark the item
+    summarize   count how the run's items ended, so a lane with failures fails
 
 Environment: LAKEFREIGHT_CONFIG (optional), ITEMS_BUCKET, plus the Snowflake
 variables in store.connect.
@@ -219,3 +220,34 @@ def reconcile(event, _context=None):
         return {**event, "state": "RECONCILED"}
     finally:
         conn.close()
+
+
+def summarize(event, _context=None):
+    """Input: list_items' output, passed through the Map. Counts this run's items by status.
+
+    The Map tolerates failed items so every item gets its attempt; this step makes the
+    execution fail afterwards if any item did not reconcile.
+    """
+    settings = load_settings()
+    lane = event["lane"]
+    body = _s3().get_object(Bucket=event["items"]["bucket"], Key=event["items"]["key"])["Body"]
+    ids = [i["work_item_id"] for i in json.loads(body.read())]
+    zone = "RESTRICTED" if lane == "RESTRICTED" else "INTERNAL"
+    conn = _connect_for(settings, zone, lane)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT STATUS, COUNT(*) FROM {settings.control_schema}.EXTRACT_WORK_ITEM "
+            "WHERE WORK_ITEM_ID IN (SELECT VALUE::STRING FROM TABLE(FLATTEN(PARSE_JSON(%s)))) "
+            "GROUP BY STATUS",
+            (json.dumps(ids),),
+        )
+        statuses = {status: int(n) for status, n in cur.fetchall()}
+    finally:
+        conn.close()
+    return {
+        "lane": lane,
+        "count": len(ids),
+        "statuses": statuses,
+        "not_reconciled": len(ids) - statuses.get("RECONCILED", 0),
+    }

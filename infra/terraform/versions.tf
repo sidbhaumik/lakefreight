@@ -25,6 +25,4 @@ provider "aws" {
 # variables (SNOWFLAKE_ORGANIZATION_NAME, SNOWFLAKE_ACCOUNT_NAME, SNOWFLAKE_USER,
 # SNOWFLAKE_AUTHENTICATOR, SNOWFLAKE_PRIVATE_KEY, ...) or ~/.snowflake/config. The role must be able to
 # create integrations, roles, users and warehouses, typically ACCOUNTADMIN.
-provider "snowflake" {
-  preview_features_enabled = ["snowflake_storage_integration_aws_resource"]
-}
+provider "snowflake" {}

@@ -2,7 +2,7 @@
 
 lakefreight's Snowflake path was run end to end against a Snowflake trial account on AWS (Snowflake 10.42) on 2026-11-26. This page records what was run, what passed, and what the run found.
 
-The AWS half (S3, IAM, Lambda, Step Functions, replication) was not part of this run. Unloads went to Snowflake internal stages and were downloaded, in the same folder layout lakefreight uses on S3.
+The AWS half (S3, IAM, Lambda, Step Functions, replication) was not part of this run. Unloads went to Snowflake internal stages and were downloaded, in the same folder layout lakefreight uses on S3. The AWS deployment is covered [further down](#live-deployment-on-aws).
 
 ## The data
 
@@ -56,6 +56,57 @@ A 100-row token cross-reference sat in a separate database.
 
 ## Not covered by this run
 
-- S3 storage integrations, IAM trust and KMS, the Lambda functions in AWS, Step Functions and replication. These need an AWS account.
+- S3 storage integrations, IAM trust and KMS, the Lambda functions in AWS, Step Functions and replication. The [AWS deployment](#live-deployment-on-aws) below covers most of these.
 - Reads from Spark or Databricks, Snowflake external tables, Redshift and BigQuery.
 - Snowflake's own sensitive data classification. Classification results take hours to reach `ACCOUNT_USAGE`, so this run used column-name rules.
+
+# Live deployment on AWS
+
+`infra/terraform` was applied to a new AWS account (us-east-2, the Snowflake account's region) and the same Snowflake trial on 2026-11-26, with OpenTofu 1.13, AWS provider 6 and Snowflake provider 2.24. The demo data above was recreated, then the full pipeline was run through Step Functions. Everything was destroyed afterwards.
+
+The account was on AWS's free plan, and that stopped the run short of S3. The section below says exactly where.
+
+## What was run
+
+1. `infra/build_lambda.sh x86_64` and `tofu apply` with the smallest warehouses and size thresholds lowered so the demo tables would chunk.
+2. The service user's private key into the Secrets Manager secret; `01_control_tables.sql` as the admin role.
+3. `lakefreight discover --table LAKEFREIGHT.CONTROL.SOURCE_METADATA` and `02_seed_config.sql`.
+4. `python -m lakefreight.planning` as the pipeline's service user.
+5. One Step Functions execution per lane.
+6. `tofu destroy`.
+
+## Results
+
+| Check | Result |
+|---|---|
+| Apply | All 100 resources created on the first attempt, on AWS and in Snowflake |
+| Storage integrations | Each integration's IAM user and external ID matched its role's trust policy exactly, resolved by Terraform in one plan |
+| Seeding | Four tables routed to all three zones; `LOAD_TS` and `EVENT_TS` picked as chunk columns |
+| Planning | 18 work items, created by the service user with a zone role |
+| Lambda functions | Read the key from Secrets Manager, connected as the service user, submitted, polled and recorded every `COPY` |
+| State machine | All three lanes ran every item through the Distributed Map |
+| Unloads | **All 18 failed** with `Error assuming AWS_ROLE`: see below |
+| Destroy | All 100 resources removed |
+
+## What the run found
+
+**The free plan blocks Snowflake.** Snowflake writes to S3 by assuming a role in your account from Snowflake's own AWS account. AWS free-plan accounts are members of an organization that AWS manages, with resource control policies that deny principals from outside that organization for services including STS and S3. Every `COPY` failed with:
+
+```
+Error assuming AWS_ROLE: User: arn:aws:iam::<snowflake account>:user/<id> is not authorized to perform: sts:AssumeRole on resource: arn:aws:iam::<your account>:role/lakefreight-snowflake-internal
+```
+
+The trust policies were correct, and the error persisted well beyond IAM's propagation delay. The account could not read its own organization policies to confirm the denying statement, so this cause is inferred from AWS's documentation of those policies. Lifting it requires upgrading to the paid plan and activating advanced features, both irreversible, so the run stopped here. `infra/README.md` now warns about it.
+
+**Bugs, now fixed:**
+
+- **A lane reported success when every item failed.** The Distributed Map tolerates failed items so each one gets its attempt, which also made the execution succeed. A `summarize` step now counts the run's items by status and fails the execution with `LaneHadFailures` if any did not reconcile.
+- **The seed script ignored the configured size threshold.** It hard-coded the 100 GiB default, so a deployment with a different `full_threshold_bytes` seeded the wrong strategy. It now reads a variable set at the top of the script.
+- **The seed script failed through the Python connector**, because it ended with comment-only lines, which the connector sends as an empty statement. The comments moved to the top.
+- Provider 2.24 warned that the storage-integration preview flag is now stable; it is removed.
+
+## Not covered by this run
+
+- Snowflake writing Parquet files and manifests into S3, and the bucket and key policies under real writes. The Snowflake-side unload, reconciliation and manifests were proven against internal stages in the run above.
+- Cross-account replication, which also needs a second account outside the free plan.
+- The new `summarize` step ran in tests and passed AWS's state machine validation, but not in a live execution.

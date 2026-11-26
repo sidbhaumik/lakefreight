@@ -16,6 +16,7 @@ locals {
     submit     = { timeout = 120, memory = 512 }
     poll       = { timeout = 60, memory = 256 }
     reconcile  = { timeout = 900, memory = 512 }
+    summarize  = { timeout = 120, memory = 256 }
   }
 }
 
@@ -38,7 +39,7 @@ data "aws_iam_policy_document" "lambda" {
 
   statement {
     sid       = "RunLists"
-    actions   = ["s3:PutObject"]
+    actions   = ["s3:PutObject", "s3:GetObject"]
     resources = ["${local.control_arn}/runs/*"]
   }
 
@@ -172,5 +173,6 @@ resource "aws_sfn_state_machine" "extract_lane" {
     SubmitFunctionArn    = aws_lambda_function.handler["submit"].arn
     PollFunctionArn      = aws_lambda_function.handler["poll"].arn
     ReconcileFunctionArn = aws_lambda_function.handler["reconcile"].arn
+    SummarizeFunctionArn = aws_lambda_function.handler["summarize"].arn
   })
 }
