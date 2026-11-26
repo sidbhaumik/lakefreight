@@ -8,6 +8,10 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 - `SECURITY.md`, private vulnerability reporting on the repository, and issue templates.
 
+### Changed
+
+- Documentation records Delta tables from a live Snowflake unload read back in Databricks SQL, and the migration guide explains reading them in Databricks: by path, or into Unity Catalog with `DEEP CLONE`.
+
 ## [0.4.2] - 2026-11-26
 
 Fixes from the first live deployment to AWS.

@@ -120,5 +120,6 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 - A single month larger than twice the target chunk size is flagged but not split further.
 - `infra/terraform` has been applied to a live AWS account and Snowflake trial, and the Lambda functions and state machine ran end to end. Snowflake writing into S3 through the zone roles, the bucket and key policies under real writes, and cross-account replication are still untested; the test account's free plan blocked Snowflake from assuming the roles.
 - Snowflake's Parquet unload keeps timestamps only to the millisecond. Columns that need finer precision have no lossless path yet.
-- Registered tables have been read back with delta-rs, pyiceberg and DuckDB, including tables unloaded from a live Snowflake account, but not yet with Spark, Databricks, Snowflake, Redshift or BigQuery.
+- Registered Delta tables have been read back in Databricks SQL, and Delta and Iceberg tables with delta-rs, pyiceberg and DuckDB, all from a live Snowflake unload. Iceberg in Databricks, and either format in Snowflake, Redshift or BigQuery, is untested.
+- Delta logs carry row counts but no per-column minimum and maximum statistics, so engines cannot skip files on filters until the table is rewritten or cloned.
 - Registration creates a table once. Adding a re-extracted chunk to an existing table is not supported yet.

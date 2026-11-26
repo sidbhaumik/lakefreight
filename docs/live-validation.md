@@ -110,3 +110,37 @@ The trust policies were correct, and the error persisted well beyond IAM's propa
 - Snowflake writing Parquet files and manifests into S3, and the bucket and key policies under real writes. The Snowflake-side unload, reconciliation and manifests were proven against internal stages in the run above.
 - Cross-account replication, which also needs a second account outside the free plan.
 - The new `summarize` step ran in tests and passed AWS's state machine validation, but not in a live execution.
+
+# Read back in Databricks
+
+On 2026-11-26 the demo data was unloaded again from the Snowflake trial with the same steps as the first run, registered as Delta Lake with `lakefreight register`, uploaded to a Unity Catalog volume, and queried from a Databricks SQL warehouse. The unknown passport token was added to the cross-reference first, so every chunk would reconcile.
+
+## Results
+
+| Check | Result |
+|---|---|
+| Unload | 18 work items, all reconciled; 3 restricted chunks with 0 unmatched tokens |
+| Row counts | `HOTEL_DIM` 200, `TRAVELER` 1,000, `RESERVATION` 60,000, `CLICK_EVENTS` 100,000: identical to Snowflake |
+| Read by path | ``SELECT ... FROM delta.`/Volumes/...` `` worked on all four tables with no extra setup |
+| Types | `NUMBER(38,0)` as `decimal(38,0)`, `DATE` as `date`, timestamps as `timestamp`, `VARIANT` as JSON text |
+| `TIMESTAMP_LTZ` and `TIMESTAMP_TZ` | Arrived as the correct UTC instants, for example `-05:00` midnight as `05:00Z` |
+| `TIMESTAMP_NTZ` | Correct wall-clock values in a UTC session, at millisecond precision |
+| `TIME` | Text with all six fractional digits kept |
+| Semi-structured | Databricks' `:` path syntax works on the JSON text directly, for example `PAYLOAD:page` |
+| Detokenization | Clear passport values, no tokens left, and the 5 NULL tokens kept as NULL |
+| NULL chunk | The 37 rows with no load date present |
+| Unity Catalog | `DEEP CLONE` into a managed table copied all 12 files and 100,000 rows |
+| Raw Parquet guard | `read_files` refused the table folder because it holds a Delta log, so the raw files, including any from a failed attempt, are not read by accident |
+
+## What the run found
+
+No bugs. Behaviour worth knowing, now in the migration guide:
+
+- **`CREATE TABLE ... LOCATION` refuses a volume path.** Registering the files in place needs the bucket set up as a Unity Catalog external location; otherwise use `DEEP CLONE`.
+- **`TIMESTAMP_NTZ` columns become Databricks `TIMESTAMP`**, which is time-zone aware, because Snowflake marks every Parquet timestamp as a UTC instant. Values display correctly in a UTC session, the SQL warehouse default. A session in another time zone shifts how they display.
+- **The Delta log has no per-column statistics**, only row counts, so Databricks cannot skip files on filters. `DEEP CLONE` copies the table as it is; writing minimum and maximum values from the Parquet footers is a possible improvement.
+
+## Not covered by this run
+
+- Iceberg in Databricks. Iceberg metadata stores absolute paths, so it must be registered against the final bucket and read through a catalog; it was not tested here.
+- Spark clusters other than a SQL warehouse, and reads directly from S3.

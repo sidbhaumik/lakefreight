@@ -220,6 +220,18 @@ If a chunk was extracted more than once, the newest manifest wins and the older 
 
 **Check:** read the table from each target engine and compare its row count with the sum of the chunk manifests.
 
+### Reading in Databricks
+
+Read a registered Delta table by path, or copy it into a Unity Catalog managed table:
+
+```sql
+SELECT COUNT(*) FROM delta.`s3://ingress/internal/DB/SCHEMA/TABLE`;
+
+CREATE TABLE main.migrated.table_name DEEP CLONE delta.`s3://ingress/internal/DB/SCHEMA/TABLE`;
+```
+
+To register the files in place as an external table instead, the bucket must be a Unity Catalog external location; `CREATE TABLE ... LOCATION` refuses a volume path. Snowflake writes every timestamp as a UTC instant, so all timestamp columns, `TIMESTAMP_NTZ` ones included, arrive as Databricks `TIMESTAMP`. Their values are right in a UTC session; set `spark.sql.session.timeZone` (or `SET TIME ZONE 'UTC'` in SQL) before comparing wall-clock values from `TIMESTAMP_NTZ` sources.
+
 ## 11. Reconcile and close out
 
 | Level | Check |

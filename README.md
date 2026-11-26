@@ -23,7 +23,7 @@ It is built for the hard version of the job: thousands of tables, petabytes of d
 | **Readers** | Any engine that reads Parquet, Delta or Iceberg: Databricks, Snowflake, Redshift, BigQuery | One-step registration in each engine's catalog |
 | **Orchestration** | AWS Step Functions, deployed with Terraform or OpenTofu | |
 
-**Status:** alpha. The Snowflake path (discover, plan, unload, reconcile, register as Delta and Iceberg) has been [run end to end on a live Snowflake account](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md), with every table read back at exactly Snowflake's row counts. The AWS half (S3, IAM, Lambda, Step Functions) and reads from Spark or Databricks have not yet run against live services.
+**Status:** alpha. The Snowflake path (discover, plan, unload, reconcile, register as Delta and Iceberg) has been [run end to end on a live Snowflake account](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md), with every table read back at exactly Snowflake's row counts. The Delta tables were [read back in Databricks](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md#read-back-in-databricks) with identical counts and values. The [AWS deployment](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md#live-deployment-on-aws) applied and ran end to end, but Snowflake writing into S3 is untested because the test account's free plan blocked it.
 
 **Known limitation:** Snowflake writes Parquet timestamps in milliseconds, so finer digits are lost on unload.
 
