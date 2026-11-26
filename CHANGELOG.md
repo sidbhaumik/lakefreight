@@ -4,6 +4,10 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-26
+
+Fixes from the first live run on Snowflake.
+
 ### Fixed
 
 - `lakefreight discover`: column-name patterns now match anywhere in the name on Snowflake, whose `REGEXP_LIKE` matches the whole string. Before, a pattern such as `PASSPORT` missed `PASSPORT_NUMBER`.
@@ -69,7 +73,8 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.1.0...v0.2.0
