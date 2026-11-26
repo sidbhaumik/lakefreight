@@ -4,6 +4,10 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+### Added
+
+- `SECURITY.md`, private vulnerability reporting on the repository, and issue templates.
+
 ## [0.4.2] - 2026-11-26
 
 Fixes from the first live deployment to AWS.

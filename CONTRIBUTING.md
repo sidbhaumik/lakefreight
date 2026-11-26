@@ -59,4 +59,4 @@ Open an issue with the command you ran, a minimal metadata CSV that reproduces t
 
 ## Security
 
-Do not report security problems in a public issue. Use GitHub's private vulnerability reporting on this repository instead.
+Do not report security problems in a public issue. Use GitHub's private vulnerability reporting on this repository instead; see [SECURITY.md](SECURITY.md).
