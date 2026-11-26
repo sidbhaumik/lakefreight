@@ -23,7 +23,9 @@ It is built for the hard version of the job: thousands of tables, petabytes of d
 | **Readers** | Any engine that reads Parquet, Delta or Iceberg: Databricks, Snowflake, Redshift, BigQuery | One-step registration in each engine's catalog |
 | **Orchestration** | AWS Step Functions, deployed with Terraform or OpenTofu | |
 
-**Status:** alpha. SQL generation, chunk planning, zone routing, reconciliation rules and table registration are unit tested; registered Delta and Iceberg tables are read back with delta-rs, pyiceberg and DuckDB in the tests. The Snowflake and AWS execution path (control-table DDL, Lambda handlers, state machine) and reads from Spark or Databricks have not yet been run against live services.
+**Status:** alpha. The Snowflake path (discover, plan, unload, reconcile, register as Delta and Iceberg) has been [run end to end on a live Snowflake account](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md), with every table read back at exactly Snowflake's row counts. The AWS half (S3, IAM, Lambda, Step Functions) and reads from Spark or Databricks have not yet run against live services.
+
+**Known limitation:** Snowflake writes Parquet timestamps in milliseconds, so finer digits are lost on unload.
 
 ## What it does
 
@@ -138,6 +140,7 @@ Run the tests:
 |---|---|
 | [Migration guide](https://github.com/sidbhaumik/lakefreight/blob/main/docs/migration-guide.md) | You have a migration like this to run and want the method, step by step |
 | [Design decisions](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md) | You want to know why it is built this way, and what was rejected |
+| [Live validation](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md) | You want to see what was proven on a real Snowflake account, and what that run found |
 
 ## Claude skill
 

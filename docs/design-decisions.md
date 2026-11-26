@@ -100,11 +100,11 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 **Why.** Rewriting petabytes doubles the cost and time of the move. A generic folder conversion would pick up files from failed attempts, which have no manifest, and turn them into duplicate rows.
 
-## 14. Timestamps leave at microsecond precision
+## 14. Timestamps are converted to UTC, and leave at millisecond precision
 
-**Decision.** Timestamp columns are unloaded as `TIMESTAMP_NTZ(6)` (time-zone-aware ones converted to UTC first), and `TIME` columns as text. Registration refuses files that still hold nanosecond timestamps.
+**Decision.** Time-zone-aware timestamps are converted to UTC `TIMESTAMP_NTZ` before unloading, and `TIME` columns leave as text. Registration refuses files with nanosecond timestamps.
 
-**Why.** Snowflake stores up to nanoseconds, but Spark, Databricks and Iceberg v2 read only microseconds, and Delta Lake has no `TIME` type. Losing sub-microsecond digits is the price of a table every target engine can read.
+**Why.** Snowflake refuses to unload `TIMESTAMP_LTZ` and `TIMESTAMP_TZ` to Parquet, and Delta Lake has no `TIME` type. A live run also showed that Snowflake writes every Parquet timestamp in milliseconds, marked as UTC, whatever the column's precision or cast; no unload setting changes it. Digits finer than a millisecond are therefore lost. A lossless alternative, unloading timestamps as text or as epoch microseconds, would make every reader convert them back, so it is not the default.
 
 ## 15. Infrastructure is Terraform, covering both AWS and Snowflake
 
@@ -118,8 +118,7 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 - Large tables with no date column run as one unpartitioned `COPY`; a single-pass `PARTITION BY` unload is not implemented.
 - A single month larger than twice the target chunk size is flagged but not split further.
-- An asynchronous `COPY` must survive the submitting Lambda's return. `infra/terraform` sets `ABORT_DETACHED_QUERY = FALSE` on the pipeline's service user for this, but it has not been confirmed against a live account.
 - `infra/terraform` has been validated and planned against the real provider schemas with mocked Snowflake and offline AWS, but never applied. IAM policies, key policies and cross-account replication need a first deployment to a test account.
-- The Parquet cast rules for timestamps, `TIME` and semi-structured types are based on documented Snowflake behaviour and have not been tested against live consumers. In particular, whether Snowflake writes `TIMESTAMP_NTZ(6)` as microsecond Parquet timestamps needs confirming in a pilot; registration will refuse the table if it does not.
-- Registered tables are read back with delta-rs, pyiceberg and DuckDB in the tests, not yet with Spark, Databricks, Snowflake, Redshift or BigQuery.
+- Snowflake's Parquet unload keeps timestamps only to the millisecond. Columns that need finer precision have no lossless path yet.
+- Registered tables have been read back with delta-rs, pyiceberg and DuckDB, including tables unloaded from a live Snowflake account, but not yet with Spark, Databricks, Snowflake, Redshift or BigQuery.
 - Registration creates a table once. Adding a re-extracted chunk to an existing table is not supported yet.

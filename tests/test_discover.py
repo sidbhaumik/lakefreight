@@ -215,7 +215,7 @@ def test_tag_value_rule_and_escaping():
         {"discover": {"pii_tags": ["gov.tags.tokenized=it's"], "pii_column_patterns": ["o'brien"]}}
     )
     sql = build_sql(["travel"], settings)
-    assert "TAG_VALUE = 'it''s'" in sql and "'o''brien'" in sql
+    assert "TAG_VALUE = 'it''s'" in sql and "'.*(o''brien).*'" in sql
     assert "IN ('TRAVEL')" in sql  # unquoted names are upper-cased
     run_discovery(settings)  # still valid SQL
 
@@ -302,3 +302,12 @@ def test_seed_script_reads_discover_columns():
     assert used <= {c.upper() for c in discover.OUTPUT_COLUMNS}
     assert all(c in seed for c in used)
     assert "<METADATA_TABLE>" not in seed
+
+
+def test_column_patterns_match_anywhere_in_snowflake():
+    # Found in the live run: Snowflake's REGEXP_LIKE matches the whole string, so a
+    # bare 'PASSPORT' missed PASSPORT_NUMBER. DuckDB matches anywhere, so only the
+    # generated SQL can show the difference.
+    settings = DiscoverSettings.from_raw({"discover": {"restricted_column_patterns": ["PASSPORT"]}})
+    sql = build_sql(["TRAVEL"], settings)
+    assert "REGEXP_LIKE(c.COLUMN_NAME, '.*(PASSPORT).*', 'i')" in sql

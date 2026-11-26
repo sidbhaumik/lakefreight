@@ -244,6 +244,6 @@ Then purge the egress buckets, drop any clones, and hand over the snapshot times
 | Treating a missing flag as non-sensitive | Unclassified data lands in the open zone | Failing closed |
 | Starting small tables first | The largest tables finish after the deadline | Starting the largest tables on day one |
 | Unloading time-zone-aware timestamps as they are | The unload fails or readers disagree | Casting to UTC `TIMESTAMP_NTZ` |
-| Unloading nanosecond timestamps | Spark, Databricks and Iceberg v2 can't read the files | Casting to `TIMESTAMP_NTZ(6)` |
+| Expecting sub-millisecond timestamps to survive | Snowflake writes Parquet timestamps in milliseconds; finer digits are lost | Checking whether any column needs more, before the pilot |
 | Building a table from every file in the folder | Files from failed attempts appear as duplicate rows | Registering only files named in a manifest |
 | Releasing files before reconciling | The receiver loads partial data | Writing the manifest last |

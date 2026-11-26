@@ -4,6 +4,15 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+### Fixed
+
+- `lakefreight discover`: column-name patterns now match anywhere in the name on Snowflake, whose `REGEXP_LIKE` matches the whole string. Before, a pattern such as `PASSPORT` missed `PASSPORT_NUMBER`.
+- Reconcile Lambda: reads the `COPY` result before its column descriptions, which Snowflake connector 5.x fills in only after a fetch.
+
+### Changed
+
+- Documentation reflects a live run on Snowflake: Parquet timestamps are written in milliseconds, and `TIMESTAMP_LTZ`/`TZ` cannot be unloaded to Parquet. See `docs/live-validation.md`.
+
 ## [0.4.0] - 2026-11-25
 
 ### Added

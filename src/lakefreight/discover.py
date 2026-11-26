@@ -141,7 +141,9 @@ def _any(conditions: Iterable[str]) -> str:
 
 
 def _patterns(patterns: Iterable[str], column: str) -> list[str]:
-    return [f"REGEXP_LIKE({column}, {literal(p)}, 'i')" for p in patterns]
+    # Snowflake's REGEXP_LIKE must match the whole string, so wrap each pattern to
+    # find it anywhere in the column name, the way the settings describe it.
+    return [f"REGEXP_LIKE({column}, {literal('.*(' + p + ').*')}, 'i')" for p in patterns]
 
 
 def _columns_cte(source: str, databases: list[str], exclude_schemas: tuple[str, ...]) -> str:

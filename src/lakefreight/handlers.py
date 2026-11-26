@@ -142,10 +142,13 @@ def reconcile(event, _context=None):
 
         # DETAILED_OUTPUT = TRUE returns one row per file.
         cur.get_results_from_sfqid(event["query_id"])
-        cols = [d[0].upper() for d in cur.description]
+        # Fetch first: the connector fills in cur.description only once rows are read.
+        # An empty chunk returns no rows and writes no file.
+        result = cur.fetchall()
+        cols = [d[0].upper() for d in cur.description or []]
         files = [
             {"name": r["FILE_NAME"], "size": int(r["FILE_SIZE"]), "rows": int(r["ROW_COUNT"])}
-            for r in (dict(zip(cols, row, strict=True)) for row in cur.fetchall())
+            for r in (dict(zip(cols, row, strict=True)) for row in result)
         ]
         rows_unloaded = sum(f["rows"] for f in files)
 

@@ -41,8 +41,10 @@ def select_expr(col: ColumnSpec, xref_alias: str | None, clear_column: str) -> s
     if xref_alias:
         return f"{xref_alias}.{quote_ident(clear_column)} AS {name}"
     base = _base_type(col.data_type)
-    # Timestamps leave as microsecond, zone-less UTC values: Spark, Databricks and
-    # Iceberg v2 cannot read nanosecond Parquet timestamps.
+    # Snowflake refuses to unload TIMESTAMP_TZ/LTZ to Parquet, so they are converted
+    # to UTC first. Snowflake writes every Parquet timestamp in milliseconds,
+    # whatever the column's precision (confirmed on a live account), so digits
+    # finer than a millisecond are lost; see docs/design-decisions.md, 14.
     if base in ("TIMESTAMP_TZ", "TIMESTAMP_LTZ"):
         return f"CONVERT_TIMEZONE('UTC', t.{name})::TIMESTAMP_NTZ(6) AS {name}"
     if base in ("TIMESTAMP_NTZ", "DATETIME"):
