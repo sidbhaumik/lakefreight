@@ -100,6 +100,8 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 **Why.** Rewriting petabytes doubles the cost and time of the move. A generic folder conversion would pick up files from failed attempts, which have no manifest, and turn them into duplicate rows.
 
+**Statistics.** Each Delta `add` action carries the file's row count, null counts and, for integers, decimals, dates and timestamps, its minimum and maximum, read from the Parquet footer. Engines use them to skip files on filters. Strings, floats and booleans get null counts only: writers may truncate string statistics, and a minimum or maximum that is wrong makes a filter silently drop rows. Timestamp maximums are rounded up to the millisecond, the precision Delta readers use.
+
 ## 14. Timestamps are converted to UTC, and leave at millisecond precision
 
 **Decision.** Time-zone-aware timestamps are converted to UTC `TIMESTAMP_NTZ` before unloading, and `TIME` columns leave as text. Registration refuses files with nanosecond timestamps.
@@ -121,5 +123,4 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 - `infra/terraform` has been applied to a live AWS account and Snowflake trial, and the Lambda functions and state machine ran end to end. Snowflake writing into S3 through the zone roles, the bucket and key policies under real writes, and cross-account replication are still untested; the test account's free plan blocked Snowflake from assuming the roles.
 - Snowflake's Parquet unload keeps timestamps only to the millisecond. Columns that need finer precision have no lossless path yet.
 - Registered Delta tables have been read back in Databricks SQL, and Delta and Iceberg tables with delta-rs, pyiceberg and DuckDB, all from a live Snowflake unload. Iceberg in Databricks, and either format in Snowflake, Redshift or BigQuery, is untested.
-- Delta logs carry row counts but no per-column minimum and maximum statistics, so engines cannot skip files on filters until the table is rewritten or cloned.
 - Registration creates a table once. Adding a re-extracted chunk to an existing table is not supported yet.

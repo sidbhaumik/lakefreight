@@ -7,6 +7,7 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 ### Added
 
 - `SECURITY.md`, private vulnerability reporting on the repository, and issue templates.
+- `lakefreight register --format delta` writes per-file column statistics into the Delta log: null counts for every column, and minimum and maximum for integers, decimals, dates and timestamps, from the Parquet footers. Engines such as Databricks use them to skip files on filters. Registration also refuses a file whose footer row count differs from its manifest.
 
 ### Changed
 

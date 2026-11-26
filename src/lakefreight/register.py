@@ -18,7 +18,7 @@ import posixpath
 import sys
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from urllib.parse import quote
 
 MANIFEST = "manifest.json"
@@ -34,6 +34,7 @@ class DataFile:
     path: str  # relative to the table root, forward slashes
     size: int
     rows: int
+    stats: str | None = None  # Delta "stats" JSON; None means row count only
 
 
 @dataclass
@@ -154,6 +155,100 @@ def common_schema(fs, root: str, files: list[DataFile]):
 
 # --- Delta Lake ---------------------------------------------------------------
 
+# Column statistics let engines skip files on filters, so a wrong value returns
+# wrong results. Only types whose Parquet min/max are exact and whose Delta text
+# form is unambiguous get min/max: integers, decimals, dates and timestamps.
+# Strings (writers may truncate them), floats (NaN) and booleans get null counts only.
+
+
+def _stat_value(value, arrow_type, upper: bool):
+    """Delta stats form of a Parquet min (upper=False) or max (upper=True), or None."""
+    import datetime as dt
+    from decimal import Decimal
+
+    import pyarrow as pa
+
+    if pa.types.is_integer(arrow_type) and isinstance(value, int):
+        return value
+    if pa.types.is_decimal(arrow_type) and isinstance(value, Decimal):
+        return _Exact(value)
+    if pa.types.is_date32(arrow_type) and isinstance(value, dt.date):
+        return value.isoformat()
+    if pa.types.is_timestamp(arrow_type) and isinstance(value, dt.datetime):
+        # Delta readers take timestamp stats to the millisecond. Round a max with
+        # finer digits up, so it never sits below a real value.
+        if upper and value.microsecond % 1000:
+            value += dt.timedelta(microseconds=1000 - value.microsecond % 1000)
+        else:
+            value -= dt.timedelta(microseconds=value.microsecond % 1000)
+        if arrow_type.tz is not None:
+            text = value.astimezone(dt.UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        else:
+            text = value.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+        return text
+    return None
+
+
+class _Exact:
+    """A decimal to write as an exact JSON number, not a float."""
+
+    def __init__(self, value):
+        self.value = value
+
+
+def _stats_json(stats: dict) -> str:
+    exact: dict[str, str] = {}
+
+    def default(obj):
+        if isinstance(obj, _Exact):
+            token = f"@@exact{len(exact)}@@"
+            exact[token] = format(obj.value, "f")
+            return token
+        raise TypeError(type(obj))
+
+    text = json.dumps(stats, default=default)
+    for token, number in exact.items():
+        text = text.replace(f'"{token}"', number)
+    return text
+
+
+def file_stats(fs, root: str, f: DataFile, schema) -> str:
+    """Delta stats for one file, from its Parquet footer: row count, null counts, min/max."""
+    _, pq = _pa()
+    with fs.open_input_file(posixpath.join(root, f.path)) as handle:
+        meta = pq.ParquetFile(handle).metadata
+    if meta.num_rows != f.rows:
+        raise RegistrationError(f"{f.path} holds {meta.num_rows} rows, its manifest says {f.rows}")
+    stats: dict = {"numRecords": f.rows}
+    mins, maxs, nulls = {}, {}, {}
+    # Map top-level columns to their leaf index; nested columns are skipped.
+    leaf = {meta.schema.column(i).path: i for i in range(meta.num_columns)}
+    for field_ in schema:
+        i = leaf.get(field_.name)
+        if i is None:
+            continue
+        groups = [meta.row_group(g).column(i).statistics for g in range(meta.num_row_groups)]
+        if not groups or any(st is None for st in groups):
+            continue
+        if all(st.has_null_count for st in groups):
+            nulls[field_.name] = sum(st.null_count for st in groups)
+        with_values = [st for st in groups if st.has_min_max]
+        # A row group without min/max must be all nulls, or the column's range is unknown.
+        if not with_values or any(
+            not st.has_min_max and not (st.has_null_count and st.null_count == st.num_values)
+            for st in groups
+        ):
+            continue
+        lo = _stat_value(min(st.min for st in with_values), field_.type, upper=False)
+        hi = _stat_value(max(st.max for st in with_values), field_.type, upper=True)
+        if lo is not None and hi is not None:
+            mins[field_.name], maxs[field_.name] = lo, hi
+    if mins:
+        stats["minValues"], stats["maxValues"] = mins, maxs
+    if nulls:
+        stats["nullCount"] = nulls
+    return _stats_json(stats)
+
 
 def delta_commit(schema, files: list[DataFile], now_ms: int | None = None) -> str:
     """Version 0 of a Delta log adding exactly these files."""
@@ -203,7 +298,7 @@ def delta_commit(schema, files: list[DataFile], now_ms: int | None = None) -> st
                     "size": f.size,
                     "modificationTime": now_ms,
                     "dataChange": True,
-                    "stats": json.dumps({"numRecords": f.rows}),
+                    "stats": f.stats or json.dumps({"numRecords": f.rows}),
                 }
             }
         )
@@ -217,7 +312,9 @@ def register_delta(table_root: str, allow_partial: bool = False) -> Collected:
     if fs.get_file_info(log_dir).type != pafs.FileType.NotFound:
         raise RegistrationError(f"{log_dir} already exists; this table is already registered")
     collected = collect(fs, root, allow_partial)
-    commit = delta_commit(common_schema(fs, root, collected.files), collected.files)
+    schema = common_schema(fs, root, collected.files)
+    files = [replace(f, stats=file_stats(fs, root, f, schema)) for f in collected.files]
+    commit = delta_commit(schema, files)
     fs.create_dir(log_dir, recursive=True)
     with fs.open_output_stream(posixpath.join(log_dir, f"{0:020d}.json")) as out:
         out.write(commit.encode())

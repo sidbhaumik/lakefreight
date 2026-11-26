@@ -134,11 +134,11 @@ On 2026-11-26 the demo data was unloaded again from the Snowflake trial with the
 
 ## What the run found
 
-No bugs. Behaviour worth knowing, now in the migration guide:
+No bugs. One gap, now closed, and behaviour worth knowing, now in the migration guide:
 
 - **`CREATE TABLE ... LOCATION` refuses a volume path.** Registering the files in place needs the bucket set up as a Unity Catalog external location; otherwise use `DEEP CLONE`.
 - **`TIMESTAMP_NTZ` columns become Databricks `TIMESTAMP`**, which is time-zone aware, because Snowflake marks every Parquet timestamp as a UTC instant. Values display correctly in a UTC session, the SQL warehouse default. A session in another time zone shifts how they display.
-- **The Delta log has no per-column statistics**, only row counts, so Databricks cannot skip files on filters. `DEEP CLONE` copies the table as it is; writing minimum and maximum values from the Parquet footers is a possible improvement.
+- **The Delta log had no per-column statistics**, only row counts, so Databricks could not skip files on filters. `lakefreight register` now writes them from the Parquet footers. The same unloads, registered again and queried in Databricks, returned identical counts for filters on timestamps, IDs, NULLs and exact boundary values, and a filter on the last three months of `CLICK_EVENTS` read 3 of 12 files.
 
 ## Not covered by this run
 

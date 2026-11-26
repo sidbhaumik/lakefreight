@@ -218,6 +218,8 @@ Registration refuses to run when:
 
 If a chunk was extracted more than once, the newest manifest wins and the older run is reported.
 
+Delta logs include each file's null counts and, for numbers, dates and timestamps, its minimum and maximum, so engines skip files that cannot match a filter. Filters on the chunk column benefit most, since each file covers one date range.
+
 **Check:** read the table from each target engine and compare its row count with the sum of the chunk manifests.
 
 ### Reading in Databricks
