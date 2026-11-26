@@ -4,6 +4,10 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-26
+
+Column statistics for registered Delta tables, and Delta output verified in Databricks.
+
 ### Added
 
 - `SECURITY.md`, private vulnerability reporting on the repository, and issue templates.
@@ -96,7 +100,8 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.3.0...v0.4.0
