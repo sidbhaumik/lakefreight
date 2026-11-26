@@ -4,6 +4,8 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-26
+
 Fixes from the first live deployment to AWS.
 
 ### Fixed
@@ -85,7 +87,8 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.2.0...v0.3.0
