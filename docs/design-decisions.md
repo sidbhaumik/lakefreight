@@ -138,10 +138,36 @@ The loss is not silent. Reconciliation counts the values in each timestamp colum
 
 ## Known gaps
 
-- Large tables whose clustering key leads with neither a date nor an integer, such as a text code, run as one `COPY`.
-- A single day, or a single integer range, larger than twice the target chunk size is flagged but not split further.
-- `infra/terraform` has been applied to a live AWS account and run end to end, with Snowflake writing into S3 through the zone roles. Cross-account replication is still untested.
-- Snowflake's Parquet unload keeps timestamps only to the millisecond. Columns that need finer precision have no lossless path yet.
-- Registered Delta tables have been read back in Databricks SQL, and Delta and Iceberg tables with delta-rs, pyiceberg and DuckDB, all from a live Snowflake unload. Iceberg in Databricks, and either format in Snowflake, Redshift or BigQuery, is untested.
-- A table still being written but not flagged `STILL_WRITTEN` is read live, so its chunks can come from different moments and reconciliation can fail. Rows changed after a snapshot need a delta pass, which is not built yet.
-- `register --update` writes the Delta log without a lock, so it relies on one registration per table at a time. Updated Delta tables have been read in Databricks SQL and with delta-rs.
+lakefreight does one job: a bulk move of Snowflake tables to open files on S3, with proof that every row and value arrived. Each item below is in one of four groups: outside that job by choice, a limit of a platform lakefreight depends on, not built yet, or built but not yet run on live services.
+
+### Out of scope by design
+
+- **Continuous replication or change data capture.** lakefreight moves each table as of one point in time. Keeping a target in sync afterwards is a different tool's job. The planned delta pass, under future work, covers only the rows that change between the snapshot and cut-over.
+- **Moving data through Python.** Snowflake writes every file, and Python only coordinates. Moving rows through a client would cap throughput at one process (decision 1).
+- **Reshaping data.** Tables leave with the same columns and values. The only conversions are the ones every engine needs to read the files: timestamps to UTC, `TIME` as text, semi-structured values as JSON text, and geography as WKT (decision 14). Remodelling belongs downstream.
+- **Loading into each engine's own storage.** lakefreight stops at Parquet files plus Delta or Iceberg metadata, which any engine can read in place. Copying them into managed tables is left to each engine. The migration guide shows how for Databricks, with `DEEP CLONE`.
+- **Guessing which tables are still being written.** lakefreight reads the `STILL_WRITTEN` flag rather than inferring it. A table that is written but not flagged is read live, so its chunks can come from different moments and reconciliation can fail. Set `snapshot = "all"` to pin every table.
+
+### Limits of the platforms
+
+- **Timestamps keep only milliseconds.** Snowflake writes every Parquet timestamp in milliseconds, whatever the column's precision. lakefreight counts the affected values and fails the chunk unless `allow_timestamp_precision_loss` is set (decision 14).
+- **Time-zone offsets are not kept.** Snowflake cannot unload `TIMESTAMP_LTZ` or `TIMESTAMP_TZ` to Parquet, so they leave as UTC instants. The instant is exact, but the original offset is lost.
+- **Time travel reaches back only as far as retention allows.** That is 1 day on Standard edition, and up to 90 on Enterprise. The planner refuses a pinned table whose retention is shorter than `snapshot_window_hours`. An extract that takes longer than retention allows can read from a zero-copy clone instead.
+
+### Future work
+
+- **A delta pass.** Each work item and manifest already records its snapshot. What's missing is a planner mode that extracts the rows changed since then, using Snowflake change tracking, and a registration step that applies them.
+- **Chunking on other keys.** A large table whose clustering key leads with neither a date nor an integer, such as a text code, runs as one `COPY`. Hash ranges on any column would split it, though the chunks would not prune.
+- **Splitting oversized ranges.** A single day or integer range more than twice the target size is flagged for review, not split. Hour ranges, or narrower integer ranges, would split it.
+- **Replication tracking and egress purge.** Terraform sets up cross-account replication, and registration already refuses a file whose size does not match its manifest. But nothing records when each chunk has fully replicated, and purging the egress buckets after hand-off is a manual step.
+- **Safe concurrent updates.** `register --update` writes the Delta log without a lock, so run one registration per table at a time. S3 conditional writes would make concurrent registrations safe.
+- **Lossless sub-millisecond timestamps.** An opt-in for the columns that need it, such as an extra column of epoch nanoseconds. It is not the default, because every reader would have to convert the values back.
+- **One-step catalog registration.** Today tables are read by path, or copied in with `DEEP CLONE`. Registering them directly in Unity Catalog, AWS Glue or Snowflake's catalog would save that step.
+- **Other clouds and sources.** Google Cloud Storage and Azure Data Lake Storage as targets, and warehouses other than Snowflake as sources.
+
+### Built but not yet verified on live services
+
+- **Cross-account replication.** Terraform creates it, and its plan tests pass, but it has never been applied across two accounts. Everything else in `infra/terraform` has run end to end on a live AWS account.
+- **Some readers.** Verified so far: Delta in Databricks SQL, and Delta and Iceberg with delta-rs, pyiceberg and DuckDB, all from live Snowflake unloads. Not yet tested: Iceberg in Databricks, and either format in Snowflake, Redshift or BigQuery.
+- **Snowflake's own sensitive-data classification.** Discovery reads it from `ACCOUNT_USAGE`, but results take hours to reach that view, so the live runs used column-name rules instead.
+- **Production scale.** The largest live table had 10 million rows. Throughput and lane sizing come from the method in the migration guide, not from a measured run with thousands of tables.

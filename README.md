@@ -136,12 +136,13 @@ The [migration guide](https://github.com/sidbhaumik/lakefreight/blob/main/docs/m
 | **Verified readers** | Databricks SQL (Delta), delta-rs, pyiceberg, DuckDB | Iceberg in Databricks; Snowflake, Redshift and BigQuery reads |
 | **Orchestration** | AWS Step Functions, deployed with Terraform or OpenTofu | |
 
-Version 0.9 covers the Snowflake-to-S3 path end to end, and every stage has run on live services except cross-account replication. It has not yet run a production-scale migration. Known limits:
+Version 0.9 covers the Snowflake-to-S3 path end to end, and every stage has run on live services except cross-account replication. It has not yet run a production-scale migration.
 
-- Snowflake's Parquet unload keeps timestamps only to the millisecond. lakefreight detects the loss and fails the chunk, but cannot avoid it.
-- Rows that change after a table's snapshot need a delta pass, which is not built yet. Neither are cross-account replication tracking or egress purge.
+- **Out of scope by design:** continuous replication. lakefreight moves each table as of one point in time; it is not a sync tool.
+- **Platform limit:** Snowflake's Parquet unload keeps timestamps only to the millisecond. lakefreight detects the loss and fails the chunk, but cannot avoid it.
+- **Next to build:** a delta pass for rows that change after a table's snapshot, and tracking of cross-account replication.
 
-The full list is in [known gaps](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#known-gaps).
+[Known gaps](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#known-gaps) has the full list, in those groups, and says what has been built but not yet run on live services.
 
 ## Documentation
 

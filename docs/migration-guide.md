@@ -185,7 +185,7 @@ If source tables are still being written, set `STILL_WRITTEN = TRUE` on them in 
 
 - `snapshot = "all"` pins every table, and `"none"` turns pinning off.
 - Time travel only reaches back as far as each table's retention: 1 day by default, up to 90 on Enterprise edition. The planner refuses a pinned table whose retention is shorter than `snapshot_window_hours` (12 by default), before it plans anything. Raise the table's `DATA_RETENTION_TIME_IN_DAYS` for the migration, lower the window, or extract from a zero-copy clone by setting `SOURCE_DATABASE`.
-- The snapshot is recorded in each work item and manifest. Rows changed after it are what a delta pass must pick up.
+- The snapshot is recorded in each work item and manifest. Rows changed after it are what a delta pass must pick up. lakefreight does not run the delta pass yet; see [known gaps](design-decisions.md#future-work).
 - With `lakefreight plan`, pass `--snapshot '2026-01-31 12:00:00'` (UTC) to pin the generated SQL.
 
 ## 9. Transfer to the target account
