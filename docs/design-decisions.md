@@ -100,6 +100,8 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 **Why.** Rewriting petabytes doubles the cost and time of the move. A generic folder conversion would pick up files from failed attempts, which have no manifest, and turn them into duplicate rows.
 
+**Updates.** `register --update` swaps whole chunks: the table's files for a chunk are replaced by the newest run's files in one commit, so a reader sees either the old chunk or the new one, never both or neither. It updates only tables that lakefreight alone has written. Any file no manifest lists, or any row-level delete, means another engine has changed the table, and swapping chunks could silently undo that change, so the update refuses.
+
 **Statistics.** Each Delta `add` action carries the file's row count, null counts and, for integers, decimals, dates and timestamps, its minimum and maximum, read from the Parquet footer. Engines use them to skip files on filters. Strings, floats and booleans get null counts only: writers may truncate string statistics, and a minimum or maximum that is wrong makes a filter silently drop rows. Timestamp maximums are rounded up to the millisecond, the precision Delta readers use.
 
 ## 14. Timestamps are converted to UTC, and leave at millisecond precision
@@ -123,4 +125,4 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 - `infra/terraform` has been applied to a live AWS account and run end to end, with Snowflake writing into S3 through the zone roles. Cross-account replication is still untested.
 - Snowflake's Parquet unload keeps timestamps only to the millisecond. Columns that need finer precision have no lossless path yet.
 - Registered Delta tables have been read back in Databricks SQL, and Delta and Iceberg tables with delta-rs, pyiceberg and DuckDB, all from a live Snowflake unload. Iceberg in Databricks, and either format in Snowflake, Redshift or BigQuery, is untested.
-- Registration creates a table once. Adding a re-extracted chunk to an existing table is not supported yet.
+- `register --update` writes the Delta log without a lock, so it relies on one registration per table at a time. Updated Delta tables have been read in Databricks SQL and with delta-rs.

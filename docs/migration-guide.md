@@ -218,6 +218,29 @@ Registration refuses to run when:
 
 If a chunk was extracted more than once, the newest manifest wins and the older run is reported.
 
+### Updating a registered table
+
+Registration runs once per table and refuses a table that already exists. When a chunk is extracted again after that, or arrives after an `--allow-partial` registration, pass `--update`:
+
+```bash
+lakefreight register --format delta --table-root s3://ingress/internal/DB/SCHEMA/TABLE --update
+```
+
+lakefreight compares the table's current files with the newest manifest of every chunk. In one new commit it removes the files of chunks that have a newer run and adds their new files, and adds chunks the table doesn't have yet. Unchanged chunks are left alone. If everything already matches, nothing is written, so `--update` is safe to run on every table after each wave. On a table that isn't registered yet, it registers it.
+
+- **Delta:** a new log version with `remove` and `add` actions. Earlier versions stay readable for time travel.
+- **Iceberg:** one `overwrite` snapshot, with the chunks in the snapshot summary under `lakefreight.added-chunks` and `lakefreight.replaced-chunks`.
+
+An update refuses to run when:
+
+- the table holds a file that no manifest lists, or uses row-level deletes or deletion vectors. Another writer has changed it, for example with `OPTIMIZE`, `DELETE` or `MERGE`, and swapping chunks could undo that work. Treat a table you want to keep updating as read-only.
+- the newest runs have a different schema from the registered table. Register them as a new table.
+- any of the checks above fails for the newest runs.
+
+Run one registration per table at a time. The Delta log is written without a lock, so two concurrent updates of the same table could overwrite each other's commit. Iceberg commits go through the catalog and are safe.
+
+Don't `VACUUM` a Delta table you still plan to update. Once the retention period passes, it deletes every file the log doesn't reference, including the manifests that `--update` relies on.
+
 Delta logs include each file's null counts and, for numbers, dates and timestamps, its minimum and maximum, so engines skip files that cannot match a filter. Filters on the chunk column benefit most, since each file covers one date range.
 
 **Check:** read the table from each target engine and compare its row count with the sum of the chunk manifests.

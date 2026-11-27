@@ -181,6 +181,20 @@ No bugs. One gap, now closed, and behaviour worth knowing, now in the migration 
 - **`TIMESTAMP_NTZ` columns become Databricks `TIMESTAMP`**, which is time-zone aware, because Snowflake marks every Parquet timestamp as a UTC instant. Values display correctly in a UTC session, the SQL warehouse default. A session in another time zone shifts how they display.
 - **The Delta log had no per-column statistics**, only row counts, so Databricks could not skip files on filters. `lakefreight register` now writes them from the Parquet footers. The same unloads, registered again and queried in Databricks, returned identical counts for filters on timestamps, IDs, NULLs and exact boundary values, and a filter on the last three months of `CLICK_EVENTS` read 3 of 12 files.
 
+## An updated table
+
+On 2026-11-27 a Delta table updated with `register --update` was read on the same SQL warehouse. Version 0 was a partial registration of 2 of 3 chunks. Version 1 replaced one chunk with a re-extract holding 200 more rows and added the missing chunk, so its log holds both `remove` and `add` actions. The data had Snowflake's Parquet types: decimals, strings and UTC timestamps.
+
+| Check | Result |
+|---|---|
+| Current version | 1,710 rows and the exact ID sum; the 200 rows only in the re-extract present, the replaced file's data absent |
+| Time travel | `VERSION AS OF 0` returned the original 1,010 rows and their exact ID sum |
+| History | `DESCRIBE HISTORY` listed version 0 `CONVERT` and version 1 `REPLACE CHUNKS`, with the chunks in its parameters |
+| Unity Catalog | `DEEP CLONE` copied the 3 live files, not the removed one, and matched the counts |
+| File skipping | A filter only the added chunk can match read 1 file and pruned 2, from the statistics in the update commit |
+
+No bugs.
+
 ## Not covered by this run
 
 - Iceberg in Databricks. Iceberg metadata stores absolute paths, so it must be registered against the final bucket and read through a catalog; it was not tested here.

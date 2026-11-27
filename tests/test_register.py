@@ -15,6 +15,8 @@ from lakefreight.register import (
     open_root,
     register_delta,
     register_iceberg,
+    update_delta,
+    update_iceberg,
 )
 
 deltalake = pytest.importorskip("deltalake")
@@ -243,3 +245,142 @@ def test_footer_row_count_must_match_manifest(tmp_path):
     (folder / "manifest.json").write_text(json.dumps(manifest))
     with pytest.raises(RegistrationError, match="holds 4 rows"):
         register_delta(str(root))
+
+
+# --- Updating a registered table ---------------------------------------------
+
+
+def delta_rows(root, version=None):
+    table = deltalake.DeltaTable(str(root), version=version)
+    return sorted(int(v) for v in table.to_pyarrow_dataset().to_table().column("ID").to_pylist())
+
+
+def log_versions(root):
+    return sorted(p.name for p in (root / "_delta_log").glob("*.json"))
+
+
+def test_delta_update_replaces_a_re_extracted_chunk(table_root):
+    register_delta(str(table_root))
+    # The chunk is extracted again, with corrected data: 4 rows from 500.
+    write_run(
+        table_root,
+        "0001_202401_202406",
+        "fix",
+        4,
+        start=500,
+        written_at="2026-01-03T00:00:00+00:00",
+    )
+    result = update_delta(str(table_root))
+    assert (result.version, result.replaced, result.added) == (1, ["0001_202401_202406"], [])
+    assert (result.removed_files, result.added_files) == (1, 1)
+    assert delta_rows(table_root) == [100, 101, 102, 500, 501, 502, 503]
+    # The old version is still there for time travel.
+    assert delta_rows(table_root, version=0) == [0, 1, 2, 3, 4, 5, 6, 100, 101, 102]
+    new = add_stats_v(table_root, 1)["chunk=0001_202401_202406"]
+    assert new["minValues"]["ID"] == 500 and new["numRecords"] == 4
+
+
+def add_stats_v(root, version):
+    name = f"{version:020d}.json"
+    lines = (root / "_delta_log" / name).read_text().splitlines()
+    adds = [json.loads(line)["add"] for line in lines if '"add"' in line]
+    return {a["path"].split("/")[0]: json.loads(a["stats"]) for a in adds}
+
+
+def test_delta_update_with_nothing_new_writes_nothing(table_root):
+    register_delta(str(table_root))
+    result = update_delta(str(table_root))
+    assert not result.changed and result.version is None
+    assert log_versions(table_root) == ["00000000000000000000.json"]
+
+
+def test_delta_update_completes_a_partial_registration(tmp_path):
+    root = tmp_path / "t"
+    write_run(root, "0001", "r", 4, chunks_in_table=3)
+    write_run(root, "null", "r", 1, chunks_in_table=3, start=900)
+    register_delta(str(root), allow_partial=True)
+    with pytest.raises(RegistrationError, match="only 2 of 3"):
+        update_delta(str(root))
+    write_run(root, "0002", "r", 2, chunks_in_table=3, start=50)
+    result = update_delta(str(root))
+    assert (result.added, result.replaced, result.removed_files) == (["0002"], [], 0)
+    assert delta_rows(root) == [0, 1, 2, 3, 50, 51, 900]
+
+
+def test_delta_update_registers_a_new_table(table_root):
+    result = update_delta(str(table_root))
+    assert result.version == 0 and sorted(result.added) == ["0001_202401_202406", "null"]
+    assert delta_rows(table_root) == [0, 1, 2, 3, 4, 5, 6, 100, 101, 102]
+
+
+def test_delta_update_refuses_a_table_another_writer_changed(table_root):
+    register_delta(str(table_root))
+    extra = pa.table(
+        {"ID": [Decimal(7)], "CITY": ["x"], "CHECKIN_TS": [datetime(2024, 1, 1)]}, schema=SCHEMA
+    )
+    deltalake.write_deltalake(str(table_root), extra, mode="append")
+    with pytest.raises(RegistrationError, match="another writer"):
+        update_delta(str(table_root))
+
+
+def test_delta_update_refuses_a_schema_change(tmp_path):
+    root = tmp_path / "t"
+    write_run(root, "full", "r1", 3, chunks_in_table=1, written_at="2026-01-01T00:00:00+00:00")
+    register_delta(str(root))
+    narrower = pa.schema([("ID", pa.decimal128(38, 0)), ("CITY", pa.string())])
+    write_run(
+        root,
+        "full",
+        "r2",
+        3,
+        chunks_in_table=1,
+        schema=narrower,
+        written_at="2026-01-02T00:00:00+00:00",
+    )
+    with pytest.raises(RegistrationError, match="different schema from the registered table"):
+        update_delta(str(root))
+    assert log_versions(root) == ["00000000000000000000.json"]
+
+
+def test_iceberg_update_replaces_a_re_extracted_chunk(table_root, tmp_path):
+    pytest.importorskip("pyiceberg")
+    pytest.importorskip("sqlalchemy")
+    from pyiceberg.catalog import load_catalog
+
+    props = {"type": "sql", "uri": f"sqlite:///{tmp_path}/catalog.db", "warehouse": str(tmp_path)}
+    first = update_iceberg(str(table_root), "local", "travel.reservation", props)
+    assert sorted(first.added) == ["0001_202401_202406", "null"]
+    write_run(
+        table_root,
+        "0001_202401_202406",
+        "fix",
+        4,
+        start=500,
+        written_at="2026-01-03T00:00:00+00:00",
+    )
+    result = update_iceberg(str(table_root), "local", "travel.reservation", props)
+    assert result.replaced == ["0001_202401_202406"]
+    assert (result.removed_files, result.added_files) == (1, 1)
+    table = load_catalog("local", **props).load_table("travel.reservation")
+    ids = sorted(int(v) for v in table.scan().to_arrow().column("ID").to_pylist())
+    assert ids == [100, 101, 102, 500, 501, 502, 503]
+    assert len(table.inspect.files()) == 2
+    summary = table.current_snapshot().summary
+    assert summary.operation.value == "overwrite"
+    assert summary["lakefreight.replaced-chunks"] == "0001_202401_202406"
+    assert not update_iceberg(str(table_root), "local", "travel.reservation", props).changed
+
+
+def test_cli_register_update(table_root, capsys):
+    assert cli.main(["register", "--format", "delta", "--table-root", str(table_root)]) == 0
+    capsys.readouterr()
+    assert cli.main(["register", "--format", "delta", "--table-root", str(table_root)]) == 1
+    assert "pass --update" in capsys.readouterr().err
+    args = ["register", "--format", "delta", "--table-root", str(table_root), "--update"]
+    assert cli.main(args) == 0
+    assert "is up to date" in capsys.readouterr().out
+    write_run(table_root, "null", "r2", 2, start=700, written_at="2999-01-01T00:00:00+00:00")
+    assert cli.main(args) == 0
+    out = capsys.readouterr().out
+    assert "(version 1): 0 chunk(s) added, 1 replaced" in out
+    assert "replaced chunk: null" in out

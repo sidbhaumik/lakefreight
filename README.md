@@ -19,7 +19,7 @@ It is built for the hard version of the job: thousands of tables, petabytes of d
 | **Source** | Snowflake | Other warehouses |
 | **Target storage** | Amazon S3 | Google Cloud Storage, Azure Data Lake Storage |
 | **File format** | Parquet, with a manifest and schema sidecar per table | |
-| **Table format** | Delta Lake or Apache Iceberg, registered over the same Parquet files without rewriting them | Incremental re-registration after a re-extract |
+| **Table format** | Delta Lake or Apache Iceberg, registered over the same Parquet files without rewriting them, and updated in place when chunks are re-extracted | |
 | **Readers** | Any engine that reads Parquet, Delta or Iceberg: Databricks, Snowflake, Redshift, BigQuery | One-step registration in each engine's catalog |
 | **Orchestration** | AWS Step Functions, deployed with Terraform or OpenTofu | |
 
@@ -43,7 +43,7 @@ It is built for the hard version of the job: thousands of tables, petabytes of d
 - **Detokenizes restricted columns** through a cross-reference table, with checks that the join neither drops nor duplicates rows.
 - **Reconciles before release.** A manifest is written only when the unloaded row count equals the source count; the receiving side loads only what has a manifest.
 - **Restarts at chunk level.** Every table or chunk is a tracked work item.
-- **Registers open table formats.** `lakefreight register` turns a table's unloaded files into a Delta Lake or Apache Iceberg table without rewriting them. Only files named in a committed manifest are included; it refuses incomplete tables, files still replicating, schema drift between chunks, and nanosecond timestamps that Spark and Iceberg v2 can't read.
+- **Registers open table formats.** `lakefreight register` turns a table's unloaded files into a Delta Lake or Apache Iceberg table without rewriting them. Only files named in a committed manifest are included; it refuses incomplete tables, files still replicating, schema drift between chunks, and nanosecond timestamps that Spark and Iceberg v2 can't read. With `--update`, a re-extracted or late chunk replaces or joins an existing table in one commit.
 
 ## Install
 
@@ -172,7 +172,6 @@ The repo includes a [Claude Code skill](https://github.com/sidbhaumik/lakefreigh
 
 - A single-pass `PARTITION BY` unload for large tables with no date column.
 - Replication tracking, egress purge, and the delta pass for tables that change during the migration.
-- Adding a re-extracted chunk to a table that is already registered. Today, delete the table metadata and register again.
 
 ## Contributing
 
