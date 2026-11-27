@@ -39,7 +39,7 @@ It is built for the hard version of the job: thousands of tables, petabytes of d
   - `INTERNAL`: tables explicitly classified as non-sensitive
 
   Unknown classification is treated as sensitive.
-- **Splits large tables into even chunks.** Months are packed to a target size, and the predicates cover every possible value, including NULL dates.
+- **Splits large tables into even chunks.** Ranges of a date or integer key are packed to a target size: whole months where they fit, days where a month is too big. The chunk column comes from the table's clustering key, so every chunk prunes, and the predicates cover every possible value, including NULL.
 - **Detokenizes restricted columns** through a cross-reference table, with checks that the join neither drops nor duplicates rows.
 - **Reconciles before release.** A manifest is written only when the unloaded row count equals the source count; the receiving side loads only what has a manifest.
 - **Restarts at chunk level.** Every table or chunk is a tracked work item.
@@ -153,7 +153,7 @@ The repo includes a [Claude Code skill](https://github.com/sidbhaumik/lakefreigh
 | `src/lakefreight/cli.py` | The `lakefreight` command |
 | `src/lakefreight/discover.py` | `lakefreight discover`: the metadata CSV from Snowflake's metadata and classification |
 | `src/lakefreight/generate.py` | `lakefreight plan`: metadata CSV in, SQL files out |
-| `src/lakefreight/chunk_planner.py` | Packs months into chunks with gap-free predicates |
+| `src/lakefreight/chunk_planner.py` | Packs date or integer-key ranges into chunks with gap-free predicates |
 | `src/lakefreight/renderer.py` | Renders the unload, source-count and unmatched-token SQL |
 | `src/lakefreight/templates/copy_unload.sql.j2` | The `COPY INTO` template |
 | `src/lakefreight/reconcile.py` | Pass/fail rules, manifest and schema sidecar |
@@ -165,12 +165,11 @@ The repo includes a [Claude Code skill](https://github.com/sidbhaumik/lakefreigh
 | `stepfunctions/extract_lane.asl.json` | State machine, one execution per lane |
 | `sql/ddl/` | Control tables and the script that seeds them from metadata |
 | `src/lakefreight/defaults.toml` | Default settings: thresholds, zones, lanes, xref names. `lakefreight config --write` makes an editable copy |
-| `examples/` | Sample metadata and month profiles |
+| `examples/` | Sample metadata and table profiles |
 | `.claude/skills/` | The Claude skill |
 
 ## Not included
 
-- A single-pass `PARTITION BY` unload for large tables with no date column.
 - Replication tracking, egress purge, and the delta pass for tables that change during the migration.
 
 ## Contributing

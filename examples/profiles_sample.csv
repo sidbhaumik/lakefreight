@@ -1,4 +1,4 @@
-table_database,table_schema,table_name,month_start,row_count
+table_database,table_schema,table_name,bucket_start,row_count
 TRAVEL,BOOKINGS,RESERVATION,2022-01-01,1000000
 TRAVEL,BOOKINGS,RESERVATION,2022-02-01,1000000
 TRAVEL,BOOKINGS,RESERVATION,2022-03-01,1000000

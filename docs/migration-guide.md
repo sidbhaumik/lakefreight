@@ -86,7 +86,7 @@ To track the plan in Snowflake as well, run `sql/ddl/01_control_tables.sql`, ada
 - How is volume distributed? Usually a small number of tables holds most of the bytes. Those are your schedule.
 - How many tables fall in each zone, and how many have missing flags?
 - Which datatypes appear? Look for time-zone-aware timestamps, semi-structured and geospatial columns.
-- Which large tables have no date column?
+- Which large tables have no clustering key on a date or integer column?
 
 **Check:** every table has a zone, and you have a list of the large tables with a proposed chunk column each.
 
@@ -109,14 +109,14 @@ Two rules make routing safe:
 
 ## 5. Plan the chunks
 
-Small tables are unloaded in one statement. Large tables are split by date so that each piece finishes in reasonable time and a failure costs one piece.
+Small tables are unloaded in one statement. Large tables are split into ranges of a date or an integer key, so that each piece finishes in reasonable time and a failure costs one piece.
 
 1. **Pick a size threshold.** Start at 100 GB and adjust after the pilot.
-2. **Pick a chunk column per large table.** It must be a column the table is clustered on, usually a load or event date. If it is not, every chunk scans the whole table and chunking is slower than one pass. Check with `SYSTEM$CLUSTERING_INFORMATION`.
-3. **Profile each large table** with one query: row count by month.
-4. **Pack months into chunks** of roughly equal size. Fixed monthly or yearly chunks give uneven sizes when volume grew over the years.
+2. **Pick a chunk column per large table.** It must be a column the table is clustered on: usually a load or event date, or for tables with no date, an integer key such as an entry or sequence number. If it is not, every chunk scans the whole table and chunking is slower than one pass. Check with `SYSTEM$CLUSTERING_INFORMATION`. Seeding picks the column the clustering key leads with when it is a date, timestamp or integer (`CHUNK_COLUMN_SOURCE = 'CLUSTERING_KEY'`). Otherwise it guesses a date column by name (`HEURISTIC`), which you must review.
+3. **Profile each large table** with one query: row count by day for a date column, or by equal-width range for an integer key.
+4. **Pack them into chunks** of roughly equal size. Fixed monthly or yearly chunks give uneven sizes when volume grew over the years.
 
-The planner in `src/lakefreight/chunk_planner.py` does step 4 and writes predicates that cannot miss a row:
+The planner in `src/lakefreight/chunk_planner.py` does step 4. Dates are packed in whole months, and a month too big for one chunk is packed by day. Chunk IDs show the range: `0002_202401_202406` for months, `0003_20240301_20240313` for days, `0004_k1000000_k2000000` for integer keys. The predicates cannot miss a row:
 
 | Chunk | Predicate |
 |---|---|
@@ -125,7 +125,7 @@ The planner in `src/lakefreight/chunk_planner.py` does step 4 and writes predica
 | Last | `col >= start` (no upper bound) |
 | NULL | `col IS NULL` (always present) |
 
-For a large table with no usable date column, unload it in a single pass.
+For a large table with no usable date or integer column, unload it in a single pass.
 
 To generate the SQL without connecting to anything:
 

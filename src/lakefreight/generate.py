@@ -4,8 +4,8 @@
         --profiles examples/profiles_sample.csv --out generated
 
 Writes one .sql file per work item under <out>/<ZONE>/<db>.<schema>.<table>/
-and a work_items.csv summary. Large tables with no month profile get a
-profile.sql to run first; rerun with --profiles once you have the results.
+and a work_items.csv summary. Large tables with no profile get a profile.sql
+to run first; rerun with --profiles once you have the results.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 from . import chunk_planner, renderer
@@ -34,7 +35,13 @@ REQUIRED = {
     "column_pii_flag",
     "column_restricted_flag",
 }
-OPTIONAL = {"column_ordinal", "column_length", "column_description", "chunk_column"}
+OPTIONAL = {
+    "column_ordinal",
+    "column_length",
+    "column_description",
+    "chunk_column",
+    "table_clustering_key",
+}
 SUMMARY_FIELDS = [
     "database",
     "schema",
@@ -56,6 +63,19 @@ class TableMeta:
     table_bytes: int
     chunk_column: str | None
     notes: list[str] = field(default_factory=list)
+    clustering_key: str | None = None
+
+    @property
+    def chunk_kind(self) -> str | None:
+        if not self.chunk_column:
+            return None
+        types = {c.name: c.data_type for c in self.spec.columns}
+        return chunk_planner.chunk_kind(types.get(self.chunk_column))
+
+    @property
+    def chunk_column_clustered(self) -> bool:
+        names = [c.name for c in self.spec.columns]
+        return chunk_planner.leading_cluster_column(self.clustering_key, names) == self.chunk_column
 
 
 def _flag(value: str | None) -> str | None:
@@ -81,9 +101,19 @@ def _read_rows(path: Path, required: set[str]) -> list[dict[str, str]]:
         return rows
 
 
-def pick_chunk_column(columns: tuple[ColumnSpec, ...]) -> str | None:
-    """First guess at a date column to chunk on. Load dates first, because
-    tables are usually clustered in load order; update dates last."""
+def pick_chunk_column(
+    columns: tuple[ColumnSpec, ...], clustering_key: str | None = None
+) -> str | None:
+    """First guess at a column to chunk on.
+
+    The column the clustering key leads with, if it is a date, timestamp or
+    integer: chunks on it prune. Otherwise a date column by name: load dates
+    first, because tables are usually clustered in load order; update dates last.
+    """
+    lead = chunk_planner.leading_cluster_column(clustering_key, [c.name for c in columns])
+    by_name = {c.name: c for c in columns}
+    if lead and chunk_planner.chunk_kind(by_name[lead].data_type):
+        return lead
 
     def rank(name: str) -> int:
         name = name.upper()
@@ -141,26 +171,48 @@ def read_metadata(path: str | Path) -> list[TableMeta]:
         except ValueError:
             table_bytes = 0
             notes.append("table size is not a number; treated as 0")
+        clustering_key = rows[0].get("table_clustering_key") or None
+        chunk_column = rows[0].get("chunk_column") or pick_chunk_column(columns, clustering_key)
+        types = {c.name: c.data_type for c in columns}
+        if chunk_column and not chunk_planner.chunk_kind(types.get(chunk_column)):
+            notes.append(
+                f"chunk column {chunk_column} is not a date, timestamp or integer column; ignored"
+            )
+            chunk_column = None
         tables.append(
             TableMeta(
                 spec=TableSpec(db, schema, table, zone, columns),
                 table_bytes=table_bytes,
-                chunk_column=rows[0].get("chunk_column") or pick_chunk_column(columns),
+                chunk_column=chunk_column,
                 notes=notes,
+                clustering_key=clustering_key,
             )
         )
     return tables
 
 
-def read_profiles(path: str | Path) -> dict[tuple[str, str, str], list[tuple[date | None, int]]]:
-    """Month profile results: table_database, table_schema, table_name,
-    month_start (blank for NULL dates), row_count."""
-    required = {"table_database", "table_schema", "table_name", "month_start", "row_count"}
-    profiles: dict[tuple[str, str, str], list[tuple[date | None, int]]] = {}
-    for row in _read_rows(Path(path), required):
+def _bucket(text: str) -> date | int | None:
+    if not text:
+        return None
+    if len(text) >= 10 and text[4] == "-":
+        return date.fromisoformat(text[:10])
+    return int(Decimal(text))
+
+
+def read_profiles(
+    path: str | Path,
+) -> dict[tuple[str, str, str], list[tuple[date | int | None, int]]]:
+    """Profile query results: table_database, table_schema, table_name,
+    bucket_start (a date, or an integer key; blank for NULL), row_count.
+    Files from older versions, with month_start instead, still work."""
+    rows = _read_rows(Path(path), {"table_database", "table_schema", "table_name", "row_count"})
+    profiles: dict[tuple[str, str, str], list[tuple[date | int | None, int]]] = {}
+    for row in rows:
+        if "bucket_start" not in row and "month_start" not in row:
+            raise ValueError(f"{path}: missing column bucket_start")
         key = (row["table_database"], row["table_schema"], row["table_name"])
-        month = date.fromisoformat(row["month_start"][:10]) if row["month_start"] else None
-        profiles.setdefault(key, []).append((month, int(float(row["row_count"]))))
+        start = _bucket(row.get("bucket_start", row.get("month_start", "")))
+        profiles.setdefault(key, []).append((start, int(float(row["row_count"]))))
     return profiles
 
 
@@ -223,15 +275,14 @@ def generate(
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(
                     f"-- Run this, save the result, and pass it with --profiles.\n"
-                    f"{chunk_planner.profile_sql(spec.source_fqn, meta.chunk_column)};\n"
+                    f"{chunk_planner.profile_sql(spec.source_fqn, meta.chunk_column, meta.chunk_kind)};\n"
                 )
-                row(
-                    "",
-                    meta.table_bytes,
-                    "NEEDS_PROFILE",
-                    rel_dir / "profile.sql",
-                    [f"chunk column {meta.chunk_column}: confirm it prunes before using it"],
+                check = (
+                    f"chunk column {meta.chunk_column} leads the clustering key"
+                    if meta.chunk_column_clustered
+                    else f"chunk column {meta.chunk_column}: confirm it prunes before using it"
                 )
+                row("", meta.table_bytes, "NEEDS_PROFILE", rel_dir / "profile.sql", [check])
                 continue
 
             if chunked and meta.chunk_column:
@@ -244,7 +295,10 @@ def generate(
             else:
                 chunks, big = [chunk_planner.full_chunk(meta.table_bytes)], set()
                 if chunked:
-                    notes.append("over the size threshold with no date column; single pass")
+                    notes.append(
+                        "over the size threshold with no date, timestamp or integer chunk "
+                        "column; single pass"
+                    )
 
             for chunk in chunks:
                 target = out_dir / rel_dir / f"{chunk.chunk_id}.sql"
@@ -276,7 +330,7 @@ def generate(
 def main(argv: list[str] | None = None, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(prog=prog, description=__doc__.splitlines()[0])
     parser.add_argument("--metadata", required=True, help="metadata CSV, one row per column")
-    parser.add_argument("--profiles", help="month profile CSV for large tables")
+    parser.add_argument("--profiles", help="profile CSV for large tables (from profile.sql)")
     parser.add_argument("--out", default="generated", help="output directory")
     parser.add_argument(
         "--config",

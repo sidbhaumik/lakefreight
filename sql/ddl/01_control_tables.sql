@@ -15,8 +15,8 @@ CREATE TABLE IF NOT EXISTS EXTRACT_CONFIG (
     ZONE                 STRING        NOT NULL,   -- RESTRICTED | PII | INTERNAL
     STRATEGY             STRING        NOT NULL,   -- FULL | CHUNKED
     LANE                 STRING        NOT NULL,   -- LARGE | SMALL | RESTRICTED
-    CHUNK_COLUMN         STRING,                   -- date/timestamp column for CHUNKED tables
-    CHUNK_COLUMN_SOURCE  STRING,                   -- HEURISTIC | REVIEWED
+    CHUNK_COLUMN         STRING,                   -- date, timestamp or integer column for CHUNKED tables
+    CHUNK_COLUMN_SOURCE  STRING,                   -- CLUSTERING_KEY | HEURISTIC | REVIEWED
     SOURCE_DATABASE      STRING,                   -- set to a zero-copy clone database to extract from it
     STILL_WRITTEN        BOOLEAN       DEFAULT FALSE,
     ENABLED              BOOLEAN       DEFAULT TRUE,

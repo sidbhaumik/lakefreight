@@ -60,6 +60,27 @@ A 100-row token cross-reference sat in a separate database.
 - Reads from Spark or Databricks, Snowflake external tables, Redshift and BigQuery.
 - Snowflake's own sensitive data classification. Classification results take hours to reach `ACCOUNT_USAGE`, so this run used column-name rules.
 
+# Chunking by integer key and by day
+
+On 2026-11-27 two tables were built in the Snowflake trial to exercise the planner on data the earlier runs did not cover:
+
+- `LEDGER`: 10 million rows, 206 MB, with no date column. It is clustered on an integer `ENTRY_ID` and has negative keys, gaps and 100 NULL keys.
+- `EVENTS`: 5 million rows, 114 MB, clustered on `TO_DATE(EVENT_TS), REGION`, with 80% of rows in March 2024 and 100 NULL timestamps.
+
+Discovery, seeding and planning ran as they would for a migration, with a 40 MB target chunk size. Then each chunk was checked in Snowflake.
+
+| Check | Result |
+|---|---|
+| Clustering keys | Discovery recorded `LINEAR(ENTRY_ID)` and `LINEAR(TO_DATE(EVENT_TS), REGION)` |
+| Chunk columns | Seeding picked `ENTRY_ID` and `EVENT_TS` from the clustering keys, including from inside `TO_DATE(...)` |
+| `LEDGER` plan | Six integer ranges of about 1.94 million rows each, plus the NULL chunk |
+| `EVENTS` plan | January to February as one chunk; March split into three day ranges; April to December as one chunk; the NULL chunk |
+| Coverage | Every row of both tables matched exactly one chunk predicate, and chunk counts summed to the table counts |
+| Pruning | Every chunk query scanned only part of the table: 1 or 2 of 4 partitions for `EVENTS`, 1 to 3 of 8 for `LEDGER` |
+| Unload | One integer-range chunk and one day-range chunk unloaded through the renderer reconciled exactly: 1,937,981 and 1,703,273 rows |
+
+No bugs. The test database was dropped afterwards.
+
 # Live deployment on AWS
 
 `infra/terraform` was applied to a new AWS account (us-east-2, the Snowflake account's region) and the same Snowflake trial on 2026-11-26, with OpenTofu 1.13, AWS provider 6 and Snowflake provider 2.24. The demo data above was recreated, then the full pipeline was run through Step Functions. Everything was destroyed afterwards.

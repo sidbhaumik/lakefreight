@@ -22,14 +22,22 @@ SETTINGS = DiscoverSettings.from_raw(
 
 # (database, schema, table, type, bytes, deleted)
 TABLES = [
-    ("TRAVEL", "CRM", "TRAVELER", "BASE TABLE", 4_000, None),
-    ("TRAVEL", "CATALOG", "HOTEL_DIM", "BASE TABLE", 1_000, None),
-    ("TRAVEL", "BOOKINGS", "RESERVATION", "BASE TABLE", 900_000_000_000, None),
-    ("TRAVEL", "WEB", "CLICK_EVENTS", "BASE TABLE", 2_000, None),
-    ("TRAVEL", "WEB", "CLICK_VIEW", "VIEW", 0, None),
-    ("TRAVEL", "WEB", "OLD_EVENTS", "BASE TABLE", 10, "2026-01-01"),
-    ("TRAVEL", "INFORMATION_SCHEMA", "TABLES", "BASE TABLE", 0, None),
-    ("OTHERDB", "PUBLIC", "SECRET", "BASE TABLE", 10, None),
+    ("TRAVEL", "CRM", "TRAVELER", "BASE TABLE", 4_000, None, None),
+    ("TRAVEL", "CATALOG", "HOTEL_DIM", "BASE TABLE", 1_000, None, None),
+    (
+        "TRAVEL",
+        "BOOKINGS",
+        "RESERVATION",
+        "BASE TABLE",
+        900_000_000_000,
+        None,
+        "LINEAR(TO_DATE(LOAD_TS))",
+    ),
+    ("TRAVEL", "WEB", "CLICK_EVENTS", "BASE TABLE", 2_000, None, None),
+    ("TRAVEL", "WEB", "CLICK_VIEW", "VIEW", 0, None, None),
+    ("TRAVEL", "WEB", "OLD_EVENTS", "BASE TABLE", 10, "2026-01-01", None),
+    ("TRAVEL", "INFORMATION_SCHEMA", "TABLES", "BASE TABLE", 0, None, None),
+    ("OTHERDB", "PUBLIC", "SECRET", "BASE TABLE", 10, None, None),
 ]
 # (database, schema, table, column, ordinal, type, precision, scale, length, comment)
 COLUMNS = [
@@ -107,9 +115,9 @@ def snowflake_stand_in():
     con.execute("CREATE SCHEMA snowflake.account_usage")
     con.execute(
         "CREATE TABLE snowflake.account_usage.tables (TABLE_CATALOG TEXT, TABLE_SCHEMA TEXT, "
-        "TABLE_NAME TEXT, TABLE_TYPE TEXT, BYTES BIGINT, DELETED TEXT)"
+        "TABLE_NAME TEXT, TABLE_TYPE TEXT, BYTES BIGINT, DELETED TEXT, CLUSTERING_KEY TEXT)"
     )
-    con.executemany("INSERT INTO snowflake.account_usage.tables VALUES (?,?,?,?,?,?)", TABLES)
+    con.executemany("INSERT INTO snowflake.account_usage.tables VALUES (?,?,?,?,?,?,?)", TABLES)
     con.execute(
         "CREATE TABLE snowflake.account_usage.columns (TABLE_CATALOG TEXT, TABLE_SCHEMA TEXT, "
         "TABLE_NAME TEXT, COLUMN_NAME TEXT, ORDINAL_POSITION INT, DATA_TYPE TEXT, "
@@ -193,6 +201,8 @@ def test_discovered_csv_feeds_plan(tmp_path):
     }
     reservation = next(m for m in generate.read_metadata(out) if m.spec.table == "RESERVATION")
     assert [c.name for c in reservation.spec.columns if c.use_xref] == ["PASSPORT_NUMBER"]
+    assert reservation.clustering_key == "LINEAR(TO_DATE(LOAD_TS))"
+    assert reservation.chunk_column == "LOAD_TS" and reservation.chunk_column_clustered
 
 
 def test_without_classification_everything_untagged_is_unknown():

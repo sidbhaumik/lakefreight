@@ -1,4 +1,5 @@
 import csv
+from datetime import date
 from pathlib import Path
 
 from lakefreight import generate
@@ -51,7 +52,7 @@ def test_large_table_without_profile_gets_profile_sql(tmp_path):
     rows = by_table(run(tmp_path), "CLICK_EVENTS")
     assert [r["status"] for r in rows] == ["NEEDS_PROFILE"]
     profile = (tmp_path / rows[0]["file"]).read_text()
-    assert """DATE_TRUNC('MONTH', "EVENT_TS")""" in profile
+    assert """DATE_TRUNC('DAY', "EVENT_TS")::DATE AS BUCKET_START""" in profile
 
 
 def test_summary_file_matches_returned_rows(tmp_path):
@@ -103,3 +104,98 @@ def test_unquoted_comma_in_datatype_is_reported(tmp_path):
         assert "line 2" in str(exc) and "quote" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def write_csv(path, header, rows):
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        w.writerows(rows)
+    return path
+
+
+META_HEADER = [
+    "table_database",
+    "table_schema",
+    "table_name",
+    "table_size_bytes",
+    "table_pii_flag",
+    "table_restricted_flag",
+    "column_name",
+    "column_ordinal",
+    "column_datatype",
+    "column_pii_flag",
+    "column_restricted_flag",
+    "table_clustering_key",
+]
+
+
+def ledger_metadata(tmp_path, clustering_key, chunk_column=""):
+    rows = [
+        [
+            "SHOP",
+            "SALES",
+            "LEDGER",
+            600 * 1024**3,
+            "N",
+            "N",
+            name,
+            i + 1,
+            dtype,
+            "N",
+            "N",
+            clustering_key,
+        ]
+        for i, (name, dtype) in enumerate(
+            [("ENTRY_ID", "NUMBER(38,0)"), ("NOTE", "VARCHAR"), ("BOOKED_AT", "TIMESTAMP_NTZ(9)")]
+        )
+    ]
+    header = META_HEADER
+    if chunk_column:
+        header = [*META_HEADER, "chunk_column"]
+        rows = [[*r, chunk_column] for r in rows]
+    return generate.read_metadata(write_csv(tmp_path / "meta.csv", header, rows))
+
+
+def test_integer_clustering_key_is_the_chunk_column(tmp_path):
+    (meta,) = ledger_metadata(tmp_path, "LINEAR(ENTRY_ID)")
+    # A clustered integer key wins over the date column the name heuristic would pick.
+    assert meta.chunk_column == "ENTRY_ID" and meta.chunk_kind == "key"
+    summary = generate.generate([meta], {}, settings, tmp_path / "out")
+    assert summary[0]["status"] == "NEEDS_PROFILE"
+    assert "leads the clustering key" in summary[0]["notes"]
+    profile = (tmp_path / "out" / summary[0]["file"]).read_text()
+    assert 'MIN("ENTRY_ID")' in profile
+
+    profiles = write_csv(
+        tmp_path / "profiles.csv",
+        ["table_database", "table_schema", "table_name", "bucket_start", "row_count"],
+        [["SHOP", "SALES", "LEDGER", str(i * 1000), 100] for i in range(8)]
+        + [["SHOP", "SALES", "LEDGER", "", 5]],
+    )
+    rows = generate.generate([meta], generate.read_profiles(profiles), settings, tmp_path / "out2")
+    assert [r["chunk_id"] for r in rows][-1] == "null"
+    assert rows[0]["chunk_id"].startswith("0001_k0_k")
+    sql = (tmp_path / "out2" / rows[1]["file"]).read_text()
+    assert 't."ENTRY_ID" >= ' in sql
+
+
+def test_non_numeric_chunk_column_is_ignored(tmp_path):
+    (meta,) = ledger_metadata(tmp_path, "", chunk_column="NOTE")
+    assert meta.chunk_column is None
+    assert "NOTE is not a date, timestamp or integer column" in "; ".join(meta.notes)
+
+
+def test_old_month_profiles_still_read(tmp_path):
+    # Files written before bucket_start existed use month_start; they still plan.
+    old = write_csv(
+        tmp_path / "old.csv",
+        ["table_database", "table_schema", "table_name", "month_start", "row_count"],
+        [
+            ["TRAVEL", "BOOKINGS", "RESERVATION", "2022-01-01", 10],
+            ["TRAVEL", "BOOKINGS", "RESERVATION", "", 1],
+        ],
+    )
+    assert generate.read_profiles(old) == {
+        ("TRAVEL", "BOOKINGS", "RESERVATION"): [(date(2022, 1, 1), 10), (None, 1)]
+    }

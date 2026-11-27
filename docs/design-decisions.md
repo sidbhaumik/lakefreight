@@ -34,11 +34,11 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 ## 5. Chunks are packed to a size, not fixed to a calendar period
 
-**Decision.** One profile query per large table returns row counts by month; months are packed into chunks near a target size.
+**Decision.** One profile query per large table returns row counts by day for a date or timestamp chunk column, or by equal-width range for an integer one (up to 10,000 ranges between its minimum and maximum). Whole months are packed into chunks near a target size; a month too big for one chunk is packed by day instead. Integer ranges are packed the same way.
 
 **Rejected.** Fixed monthly or yearly chunks.
 
-**Why.** Volume is rarely even across many years of history. Fixed periods give tiny early chunks and oversized recent ones, which makes run time unpredictable.
+**Why.** Volume is rarely even across many years of history. Fixed periods give tiny early chunks and oversized recent ones, which makes run time unpredictable. Packing whole months where they fit keeps chunk names readable and stable from one plan to the next; splitting only the months that need it keeps a single busy month from becoming one huge unload. Tables with no date column, such as ledgers keyed by a sequence, get the same even chunks from their integer key.
 
 ## 6. Chunk predicates are open-ended, and there is always a NULL chunk
 
@@ -50,9 +50,9 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 ## 7. The chunk column must prune
 
-**Decision.** A large table is chunked only on a column it is clustered on. Otherwise it is unloaded in a single pass.
+**Decision.** A large table is chunked only on a column it is clustered on. Otherwise it is unloaded in a single pass. `discover` records each table's clustering key, and seeding picks the column the key leads with when it is a date, timestamp or integer, including one wrapped in an expression such as `TO_DATE(EVENT_TS)`. Only when there is no such key does it fall back to guessing a date column by name, marked for review.
 
-**Why.** Without pruning, each of N chunks scans the full table, so the work is N times a single pass.
+**Why.** Without pruning, each of N chunks scans the full table, so the work is N times a single pass. Reading the clustering key turns this rule from a review step into the default.
 
 ## 8. Detokenization uses a LEFT JOIN, checked against the un-joined count
 
@@ -120,8 +120,8 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 ## Known gaps
 
-- Large tables with no date column run as one unpartitioned `COPY`; a single-pass `PARTITION BY` unload is not implemented.
-- A single month larger than twice the target chunk size is flagged but not split further.
+- Large tables whose clustering key leads with neither a date nor an integer, such as a text code, run as one `COPY`.
+- A single day, or a single integer range, larger than twice the target chunk size is flagged but not split further.
 - `infra/terraform` has been applied to a live AWS account and run end to end, with Snowflake writing into S3 through the zone roles. Cross-account replication is still untested.
 - Snowflake's Parquet unload keeps timestamps only to the millisecond. Columns that need finer precision have no lossless path yet.
 - Registered Delta tables have been read back in Databricks SQL, and Delta and Iceberg tables with delta-rs, pyiceberg and DuckDB, all from a live Snowflake unload. Iceberg in Databricks, and either format in Snowflake, Redshift or BigQuery, is untested.

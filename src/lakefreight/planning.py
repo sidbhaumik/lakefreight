@@ -20,8 +20,11 @@ def build_work_items(conn, settings: Settings) -> int:
     cur = conn.cursor()
     cur.execute(
         "SELECT c.DATABASE_NAME, c.SCHEMA_NAME, c.TABLE_NAME, c.TABLE_BYTES, c.ZONE, c.LANE, "
-        "c.STRATEGY, c.CHUNK_COLUMN, c.SOURCE_DATABASE "
+        "c.STRATEGY, c.CHUNK_COLUMN, c.SOURCE_DATABASE, k.DATA_TYPE "
         f"FROM {ctl}.EXTRACT_CONFIG c "
+        f"LEFT JOIN {ctl}.EXTRACT_COLUMN_CONFIG k ON k.DATABASE_NAME = c.DATABASE_NAME "
+        "AND k.SCHEMA_NAME = c.SCHEMA_NAME AND k.TABLE_NAME = c.TABLE_NAME "
+        "AND k.COLUMN_NAME = c.CHUNK_COLUMN "
         "WHERE c.ENABLED AND NOT EXISTS ("
         f"  SELECT 1 FROM {ctl}.EXTRACT_WORK_ITEM w "
         "  WHERE w.DATABASE_NAME = c.DATABASE_NAME AND w.SCHEMA_NAME = c.SCHEMA_NAME "
@@ -38,16 +41,24 @@ def build_work_items(conn, settings: Settings) -> int:
         strategy,
         chunk_col,
         source_db,
+        chunk_type,
     ) in cur.fetchall():
         table_bytes = int(table_bytes or 0)
         if strategy == "CHUNKED" and chunk_col:
+            kind = chunk_planner.chunk_kind(chunk_type)
+            if kind is None:
+                raise ValueError(
+                    f"{db}.{schema}.{table}: chunk column {chunk_col} is "
+                    f"{chunk_type or 'not a column of the table'}; it must be a date, "
+                    "timestamp or integer column. Fix CHUNK_COLUMN and run the planner again."
+                )
             fqn = ".".join(quote_ident(p) for p in (source_db or db, schema, table))
-            cur.execute(chunk_planner.profile_sql(fqn, chunk_col))
+            cur.execute(chunk_planner.profile_sql(fqn, chunk_col, kind))
             chunks = chunk_planner.plan_chunks(
                 chunk_col, cur.fetchall(), table_bytes, settings.target_chunk_bytes
             )
         else:
-            # FULL, or CHUNKED with no usable date column: one pass over the table.
+            # FULL, or CHUNKED with no usable chunk column: one pass over the table.
             chunks = [chunk_planner.full_chunk(table_bytes)]
         cur.executemany(
             f"INSERT INTO {ctl}.EXTRACT_WORK_ITEM "

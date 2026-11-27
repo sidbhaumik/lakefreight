@@ -41,6 +41,7 @@ OUTPUT_COLUMNS = [
     "column_pii_flag",
     "column_restricted_flag",
     "column_description",
+    "table_clustering_key",
 ]
 
 SOURCES = ("account_usage", "information_schema")
@@ -151,7 +152,7 @@ def _columns_cte(source: str, databases: list[str], exclude_schemas: tuple[str, 
     select = (
         "SELECT c.TABLE_CATALOG, c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.ORDINAL_POSITION,\n"
         "         c.DATA_TYPE, c.NUMERIC_PRECISION, c.NUMERIC_SCALE, c.CHARACTER_MAXIMUM_LENGTH,\n"
-        "         c.COMMENT, t.BYTES"
+        "         c.COMMENT, t.BYTES, t.CLUSTERING_KEY"
     )
     join = (
         "ON t.TABLE_CATALOG = c.TABLE_CATALOG AND t.TABLE_SCHEMA = c.TABLE_SCHEMA "
@@ -266,7 +267,8 @@ def build_sql(databases: list[str], settings: DiscoverSettings) -> str:
         "  CHARACTER_MAXIMUM_LENGTH AS COLUMN_LENGTH,\n"
         "  COLUMN_PII_FLAG,\n"
         "  COLUMN_RESTRICTED_FLAG,\n"
-        "  COMMENT AS COLUMN_DESCRIPTION\n"
+        "  COMMENT AS COLUMN_DESCRIPTION,\n"
+        "  CLUSTERING_KEY AS TABLE_CLUSTERING_KEY\n"
         "FROM flagged\n"
         "ORDER BY TABLE_DATABASE, TABLE_SCHEMA, TABLE_NAME, COLUMN_ORDINAL"
     )
