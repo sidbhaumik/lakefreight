@@ -51,3 +51,25 @@ def test_settings_from_environment_toml(monkeypatch, tmp_path):
     settings = load_settings()
     assert settings.zones["INTERNAL"].kms_key_id == "alias/k"
     assert settings.zones["PII"].kms_key_id is None
+
+
+def test_connect_drops_secondary_roles(monkeypatch):
+    # Every zone role is granted to the one service user; with Snowflake's
+    # default secondary roles an INTERNAL session could read the other zones.
+    executed, opened = [], {}
+
+    class FakeConn:
+        def cursor(self):
+            return types.SimpleNamespace(execute=executed.append)
+
+    def fake_connect(**kwargs):
+        opened.update(kwargs)
+        return FakeConn()
+
+    connector = types.SimpleNamespace(connect=fake_connect)
+    monkeypatch.setitem(sys.modules, "snowflake.connector", connector)
+    monkeypatch.setitem(sys.modules, "snowflake", types.SimpleNamespace(connector=connector))
+    monkeypatch.setattr(store, "credentials", lambda: {"account": "a", "user": "u"})
+    store.connect("LAKEFREIGHT_INTERNAL_EXTRACT", "WH")
+    assert opened["role"] == "LAKEFREIGHT_INTERNAL_EXTRACT"
+    assert executed == ["USE SECONDARY ROLES NONE"]

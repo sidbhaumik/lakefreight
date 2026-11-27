@@ -2,7 +2,7 @@
 
 `infra/terraform` creates everything the Step Functions pipeline needs, on AWS and in Snowflake, from one configuration. It works with Terraform 1.6+ or OpenTofu.
 
-**Status:** applied to a live AWS account and Snowflake trial: every resource was created and destroyed cleanly, and the Lambda functions and state machine ran end to end. Unloads into S3 could not be tested there, because the AWS account was on the free plan (see below). Deploy to a test account first; see `docs/live-validation.md`.
+**Status:** applied to a live AWS account and Snowflake trial and run end to end: Snowflake unloaded every table into S3 through the zone roles, each file encrypted with its zone's key, and the tables were registered and read back from S3. Cross-account replication is untested. Deploy to a test account first; see `docs/live-validation.md`.
 
 ## What it creates
 
@@ -17,7 +17,7 @@
 | AWS | Optional replication role and rules | Copy each egress bucket to the receiving account. |
 | Snowflake | Control database and schema | Control tables and stages. |
 | Snowflake | One warehouse per lane | `LARGE`, `SMALL` and `RESTRICTED` lanes run independently. |
-| Snowflake | One role, storage integration and stage per zone | A role can use only its own stage. |
+| Snowflake | One role, storage integration and stage per zone | A role can use only its own stage. The service user has secondary roles turned off, so each session holds only its zone's role. |
 | Snowflake | Grants | Read access to the source databases; the token cross-reference table for `RESTRICTED` only. |
 | Snowflake | Key-pair service user | Used by the Lambda functions. Detached queries keep running, so asynchronous `COPY` works. |
 

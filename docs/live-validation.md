@@ -64,9 +64,11 @@ A 100-row token cross-reference sat in a separate database.
 
 `infra/terraform` was applied to a new AWS account (us-east-2, the Snowflake account's region) and the same Snowflake trial on 2026-11-26, with OpenTofu 1.13, AWS provider 6 and Snowflake provider 2.24. The demo data above was recreated, then the full pipeline was run through Step Functions. Everything was destroyed afterwards.
 
-The account was on AWS's free plan, and that stopped the run short of S3. The section below says exactly where.
+It was run twice. The first account was on AWS's free plan, which stopped the run short of S3. The second, a standard paid account, ran all the way through: Snowflake wrote every file into S3, and the tables were registered and read back from there. That second run also found a gap in zone isolation, which is now fixed.
 
-## What was run
+## First run: free-plan account
+
+### What was run
 
 1. `infra/build_lambda.sh x86_64` and `tofu apply` with the smallest warehouses and size thresholds lowered so the demo tables would chunk.
 2. The service user's private key into the Secrets Manager secret; `01_control_tables.sql` as the admin role.
@@ -75,7 +77,7 @@ The account was on AWS's free plan, and that stopped the run short of S3. The se
 5. One Step Functions execution per lane.
 6. `tofu destroy`.
 
-## Results
+### Results
 
 | Check | Result |
 |---|---|
@@ -88,7 +90,7 @@ The account was on AWS's free plan, and that stopped the run short of S3. The se
 | Unloads | **All 18 failed** with `Error assuming AWS_ROLE`: see below |
 | Destroy | All 100 resources removed |
 
-## What the run found
+### What the run found
 
 **The free plan blocks Snowflake.** Snowflake writes to S3 by assuming a role in your account from Snowflake's own AWS account. AWS free-plan accounts are members of an organization that AWS manages, with resource control policies that deny principals from outside that organization for services including STS and S3. Every `COPY` failed with:
 
@@ -105,11 +107,50 @@ The trust policies were correct, and the error persisted well beyond IAM's propa
 - **The seed script failed through the Python connector**, because it ended with comment-only lines, which the connector sends as an empty statement. The comments moved to the top.
 - Provider 2.24 warned that the storage-integration preview flag is now stable; it is removed.
 
-## Not covered by this run
+## Second run: paid account
 
-- Snowflake writing Parquet files and manifests into S3, and the bucket and key policies under real writes. The Snowflake-side unload, reconciliation and manifests were proven against internal stages in the run above.
-- Cross-account replication, which also needs a second account outside the free plan.
-- The new `summarize` step ran in tests and passed AWS's state machine validation, but not in a live execution.
+The same configuration, with the fixes above, was applied to a standard AWS account in the same region on the same day.
+
+### What was run
+
+Steps 1 to 5 as above. The plan created 102 resources, including the `summarize` function. Then:
+
+6. The RESTRICTED lane failed on purpose: see below. The missing token was added to the cross-reference and the lane run again.
+7. `lakefreight register --format delta` on each table's S3 prefix, then a read back from S3 with delta-rs.
+8. The zone-isolation check described below. After the fix, the stack was updated, the output and work items cleared, and the whole pipeline run again from planning.
+9. The buckets emptied of every object version, then `tofu destroy`.
+
+### Results
+
+| Check | Result |
+|---|---|
+| Unloads | All 18 work items reconciled: 161,200 rows across the four tables, written by Snowflake through each zone's role |
+| Zones | INTERNAL and PII tables in the egress bucket under their own prefixes; RESERVATION in the restricted bucket |
+| Encryption | Every file encrypted with its zone's own KMS key |
+| Failure gate | The RESTRICTED lane failed with `LaneHadFailures` when one chunk held 3 tokens with no match in the cross-reference. After the fix, the rerun retried only that chunk (2 attempts) and succeeded |
+| Failed attempt | The failed attempt left a Parquet file with no manifest. Registration ignored it and counted exactly 60,000 rows |
+| Registration on S3 | All four tables registered in place on S3, at Snowflake's row counts. CLICK_EVENTS: 13 chunks, 12 files (its NULL chunk is empty) |
+| Read back from S3 | delta-rs read every table at the expected counts. No passport left tokenized; the 5 NULL tokens stayed NULL; 37 NULL load timestamps kept. Every CLICK_EVENTS file carries min/max statistics |
+| Rerun without secondary roles | All 18 items reconciled on the first attempt, so each zone role holds every grant it needs |
+| Destroy | Nothing left in the account; the secret and keys are in AWS's standard pending-deletion window |
+
+### What the run found
+
+**Zone roles did not isolate a session.** Snowflake activates every role granted to a user as a *secondary role* by default (`DEFAULT_SECONDARY_ROLES = ('ALL')`). The pipeline's service user holds all three zone roles, so a session opened as the INTERNAL role could also list the PII and RESTRICTED stages. The unloads still went to the right places, because the generated SQL picks each table's stage from its zone. But the second line of defence, a permission error if routing ever goes wrong, was missing. Now:
+
+- Terraform sets `default_secondary_roles_option = "NONE"` on the service user.
+- `connect()` runs `USE SECONDARY ROLES NONE` on every session, which also protects setups that do not use this Terraform.
+
+After the fix, an INTERNAL session could list only its own stage; listing the PII or RESTRICTED stage failed.
+
+**Timestamps without a zone** come back as UTC-adjusted timestamps (`LOAD_TS` is `timestamp[us, tz=UTC]` in Parquet). This is expected; see the Databricks section below.
+
+**Teardown needs the buckets emptied first, including every object version**, since they are versioned and Terraform does not force-delete them. `infra/README.md` already says so.
+
+## Not covered by these runs
+
+- Cross-account replication, which needs a second account.
+- Iceberg registration on S3; it was tested on local files above.
 
 # Read back in Databricks
 

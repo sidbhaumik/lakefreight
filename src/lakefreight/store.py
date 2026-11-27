@@ -46,10 +46,21 @@ def credentials() -> dict:
 
 
 def connect(role: str, warehouse: str):
-    """Key-pair connection using the given role and warehouse."""
+    """Key-pair connection that holds only the given role.
+
+    Snowflake activates every granted role as a secondary role by default, so a
+    session opened as the INTERNAL role could still read the PII and RESTRICTED
+    stages. Turning secondary roles off keeps each zone's grants a real boundary.
+    """
     import snowflake.connector  # imported here so the pure modules need no connector
 
-    return snowflake.connector.connect(**credentials(), role=role, warehouse=warehouse)
+    conn = snowflake.connector.connect(**credentials(), role=role, warehouse=warehouse)
+    try:
+        conn.cursor().execute("USE SECONDARY ROLES NONE")
+    except Exception:
+        conn.close()
+        raise
+    return conn
 
 
 def get_work_item(cur, settings: Settings, work_item_id: str) -> dict:

@@ -255,6 +255,11 @@ resource "snowflake_service_user" "pipeline" {
   default_role      = snowflake_account_role.zone["INTERNAL"].name
   default_warehouse = snowflake_warehouse.lane["SMALL"].name
 
+  # The user holds all three zone roles. Snowflake's default activates them all
+  # as secondary roles, which would let an INTERNAL session read PII and
+  # RESTRICTED stages; each session must hold only its own zone's role.
+  default_secondary_roles_option = "NONE"
+
   # The pipeline starts each COPY asynchronously and polls it from a later
   # Lambda call; the query must keep running when the starting session ends.
   abort_detached_query = false

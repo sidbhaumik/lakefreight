@@ -24,7 +24,7 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 **Rejected.** One bucket with folders chosen by the code.
 
-**Why.** With one writer role, a routing bug writes detokenized identifiers into the open folder and nothing stops it. With separate roles the same bug fails with a permission error. Restricted data is kept apart from other personal data because clear identifiers usually carry stricter compliance rules and shorter retention.
+**Why.** With one writer role, a routing bug writes detokenized identifiers into the open folder and nothing stops it. With separate roles the same bug fails with a permission error. This holds only if each session holds just one zone role: Snowflake activates all of a user's granted roles as secondary roles by default, so the service user has them turned off and every connection runs `USE SECONDARY ROLES NONE`. Restricted data is kept apart from other personal data because clear identifiers usually carry stricter compliance rules and shorter retention.
 
 ## 4. Sensitivity fails closed
 
@@ -120,7 +120,7 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 - Large tables with no date column run as one unpartitioned `COPY`; a single-pass `PARTITION BY` unload is not implemented.
 - A single month larger than twice the target chunk size is flagged but not split further.
-- `infra/terraform` has been applied to a live AWS account and Snowflake trial, and the Lambda functions and state machine ran end to end. Snowflake writing into S3 through the zone roles, the bucket and key policies under real writes, and cross-account replication are still untested; the test account's free plan blocked Snowflake from assuming the roles.
+- `infra/terraform` has been applied to a live AWS account and run end to end, with Snowflake writing into S3 through the zone roles. Cross-account replication is still untested.
 - Snowflake's Parquet unload keeps timestamps only to the millisecond. Columns that need finer precision have no lossless path yet.
 - Registered Delta tables have been read back in Databricks SQL, and Delta and Iceberg tables with delta-rs, pyiceberg and DuckDB, all from a live Snowflake unload. Iceberg in Databricks, and either format in Snowflake, Redshift or BigQuery, is untested.
 - Registration creates a table once. Adding a re-extracted chunk to an existing table is not supported yet.
