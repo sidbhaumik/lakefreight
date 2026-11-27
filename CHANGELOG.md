@@ -4,6 +4,18 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-26
+
+A security fix found in the first full live run on AWS.
+
+### Security
+
+- Zone roles now isolate each session. Snowflake activates all of a user's granted roles as secondary roles by default, so a session opened as the INTERNAL role could also read the PII and RESTRICTED stages. The Terraform service user now has `default_secondary_roles_option = "NONE"`, and every connection runs `USE SECONDARY ROLES NONE`. Found in a live AWS run; routing was not affected, since the generated SQL picks each table's stage from its zone.
+
+### Changed
+
+- Documentation records a full live run on a paid AWS account: Snowflake unloading into S3 through the zone roles, per-zone KMS encryption, the `LaneHadFailures` gate and retry, and registration and read back on S3.
+
 ## [0.5.0] - 2026-11-26
 
 Column statistics for registered Delta tables, and Delta output verified in Databricks.
@@ -100,7 +112,8 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/sidbhaumik/lakefreight/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.0...v0.4.1
