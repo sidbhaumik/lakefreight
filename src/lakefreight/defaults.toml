@@ -8,6 +8,8 @@ max_file_size_bytes = 1073741824            # 1 GiB Parquet part files
 unmatched_token_threshold = 0               # restricted zone: max non-null tokens with no xref match per chunk
 # parquet_file_format = "MIGRATION.CONTROL.LAKEFREIGHT_PARQUET"  # reads unloaded files back; default: control_schema + .LAKEFREIGHT_PARQUET
 allow_timestamp_precision_loss = false      # true accepts timestamps cut to the millisecond (Parquet from Snowflake keeps no more)
+snapshot = "still_written"                  # read tables as of one snapshot (time travel): none, still_written (STILL_WRITTEN tables) or all
+snapshot_window_hours = 12                  # most hours a pinned table's extract may run after planning; checked against its retention
 
 [xref]
 table = "SECURE.PUBLIC.TOKEN_XREF"          # CHANGE-ME: fully qualified name

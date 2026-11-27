@@ -110,6 +110,23 @@ variable "unmatched_token_threshold" {
   default     = 0
 }
 
+variable "snapshot" {
+  description = "Which tables are read as of one snapshot through time travel: none, still_written (tables with STILL_WRITTEN set) or all."
+  type        = string
+  default     = "still_written"
+
+  validation {
+    condition     = contains(["none", "still_written", "all"], var.snapshot)
+    error_message = "snapshot must be none, still_written or all."
+  }
+}
+
+variable "snapshot_window_hours" {
+  description = "Most hours a pinned table's extract may run after planning. The planner refuses tables whose time-travel retention is shorter."
+  type        = number
+  default     = 12
+}
+
 variable "allow_timestamp_precision_loss" {
   description = "Accept timestamps losing digits finer than a millisecond, which Parquet from Snowflake cannot keep. When false, such chunks fail reconciliation."
   type        = bool

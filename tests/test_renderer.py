@@ -184,3 +184,51 @@ def test_parquet_file_format_setting(tmp_path):
     assert custom.parquet_file_format == "OPS.FMT.PQ" and custom.allow_timestamp_precision_loss
     assert settings.parquet_file_format == "MIGRATION.CONTROL.LAKEFREIGHT_PARQUET"
     assert not settings.allow_timestamp_precision_loss
+
+
+# --- Snapshots ---------------------------------------------------------------
+
+
+def test_every_source_read_can_be_pinned_to_a_snapshot():
+    from datetime import datetime
+
+    snap = datetime(2026, 11, 27, 20, 0, 0, 5)
+    at = "AT(TIMESTAMP => '2026-11-27 20:00:00.000005 +00:00'::TIMESTAMP_TZ) t"
+    cols = (ColumnSpec("ID", "NUMBER(38,0)"), ColumnSpec("P", "VARCHAR", use_xref=True))
+    t = table("RESTRICTED", cols)
+    for sql in (
+        renderer.unload_sql(t, None, "full", "r", settings, snap),
+        renderer.source_count_sql(t, None, snap),
+        renderer.unmatched_sql(t, None, settings, snap),
+        renderer.source_values_sql(t, None, settings, snap),
+    ):
+        assert f'"SALES"."PUBLIC"."ORDERS" {at}' in sql
+        # The cross-reference is read as it is now; only the source is pinned.
+        assert "TOKEN_XREF AT(" not in sql
+    assert " AT(" not in renderer.source_count_sql(t, None)
+
+
+def test_snapshot_literal_accepts_utc_text_and_refuses_anything_else():
+    assert (
+        renderer.snapshot_literal("2026-01-31T12:00:00")
+        == "'2026-01-31 12:00:00 +00:00'::TIMESTAMP_TZ"
+    )
+    for bad in (
+        "yesterday",
+        "2026-01-31 12:00:00'; DROP TABLE X; --",
+        "2026-01-31 12:00:00 +05:00",
+    ):
+        with pytest.raises(ValueError, match="UTC timestamp"):
+            renderer.snapshot_literal(bad)
+
+
+def test_snapshot_setting(tmp_path):
+    from lakefreight.config import default_config_text
+
+    assert settings.snapshot == "still_written" and settings.snapshot_window_hours == 12
+    path = tmp_path / "lakefreight.toml"
+    path.write_text(
+        default_config_text().replace('snapshot = "still_written"', 'snapshot = "sometimes"', 1)
+    )
+    with pytest.raises(ValueError, match="extract.snapshot"):
+        load_settings(path)

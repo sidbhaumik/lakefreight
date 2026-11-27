@@ -97,6 +97,25 @@ def _fingerprint(col: ColumnSpec, value: str, detokenized: bool) -> str:
     return f"({value})::{col.data_type}"
 
 
+def snapshot_literal(snapshot) -> str:
+    """A UTC snapshot (datetime or text) as an unambiguous Snowflake timestamp."""
+    if snapshot is None:
+        raise ValueError("no snapshot")
+    if hasattr(snapshot, "strftime"):
+        snapshot = snapshot.strftime("%Y-%m-%d %H:%M:%S.%f")
+    text = str(snapshot).strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d{1,9})?", text):
+        raise ValueError(f"snapshot must be a UTC timestamp like 2026-01-31 12:00:00: {text!r}")
+    return f"'{text.replace('T', ' ')} +00:00'::TIMESTAMP_TZ"
+
+
+def source_ref(table: TableSpec, snapshot=None) -> str:
+    """The source table, read as of the snapshot when there is one (time travel)."""
+    if snapshot is None:
+        return table.source_fqn
+    return f"{table.source_fqn} AT(TIMESTAMP => {snapshot_literal(snapshot)})"
+
+
 def _literal(text: str) -> str:
     return "'" + text.replace("\\", "\\\\").replace("'", "''") + "'"
 
@@ -126,7 +145,12 @@ def _check_zone(table: TableSpec, joins: dict[str, XrefJoin]) -> None:
 
 
 def unload_sql(
-    table: TableSpec, predicate: str | None, chunk_id: str, run_id: str, settings: Settings
+    table: TableSpec,
+    predicate: str | None,
+    chunk_id: str,
+    run_id: str,
+    settings: Settings,
+    snapshot=None,
 ) -> str:
     joins = _xref_joins(table)
     _check_zone(table, joins)
@@ -138,7 +162,7 @@ def unload_sql(
         stage=settings.zones[table.zone].stage,
         unload_path=unload_path(table, chunk_id, run_id),
         select_exprs=exprs,
-        source_fqn=table.source_fqn,
+        source_fqn=source_ref(table, snapshot),
         xref_joins=list(joins.values()),
         xref_table=settings.xref_table,
         token_column=quote_ident(settings.xref_token_column),
@@ -147,12 +171,14 @@ def unload_sql(
     )
 
 
-def source_count_sql(table: TableSpec, predicate: str | None) -> str:
-    sql = f"SELECT COUNT(*) FROM {table.source_fqn} t"
+def source_count_sql(table: TableSpec, predicate: str | None, snapshot=None) -> str:
+    sql = f"SELECT COUNT(*) FROM {source_ref(table, snapshot)} t"
     return f"{sql} WHERE {predicate}" if predicate else sql
 
 
-def source_values_sql(table: TableSpec, predicate: str | None, settings: Settings) -> str:
+def source_values_sql(
+    table: TableSpec, predicate: str | None, settings: Settings, snapshot=None
+) -> str:
     """One row: VALUE_HASH over every column as unloaded, then for each timestamp
     column a count of values with digits finer than a millisecond (SUB_MS_1...).
     Uses the same joins as the unload, so detokenized values are compared too."""
@@ -179,7 +205,7 @@ def source_values_sql(table: TableSpec, predicate: str | None, settings: Setting
         for j in joins.values()
     )
     select = ",\n  ".join([f"HASH_AGG({', '.join(hashed)}) AS VALUE_HASH", *checks])
-    sql = f"SELECT\n  {select}\nFROM {table.source_fqn} t{join_sql}"
+    sql = f"SELECT\n  {select}\nFROM {source_ref(table, snapshot)} t{join_sql}"
     return f"{sql}\nWHERE {predicate}" if predicate else sql
 
 
@@ -200,7 +226,9 @@ def staged_values_sql(table: TableSpec, chunk_id: str, run_id: str, settings: Se
     )
 
 
-def unmatched_sql(table: TableSpec, predicate: str | None, settings: Settings) -> str | None:
+def unmatched_sql(
+    table: TableSpec, predicate: str | None, settings: Settings, snapshot=None
+) -> str | None:
     """Count rows where any RESTRICTED token is non-null but missing from the xref."""
     joins = _xref_joins(table)
     if not joins:
@@ -214,4 +242,4 @@ def unmatched_sql(table: TableSpec, predicate: str | None, settings: Settings) -
         f"(t.{j.column} IS NOT NULL AND {j.alias}.{token} IS NULL)" for j in joins.values()
     )
     where = f"({predicate}) AND ({misses})" if predicate else misses
-    return f"SELECT COUNT(*) FROM {table.source_fqn} t\n{join_sql}\nWHERE {where}"
+    return f"SELECT COUNT(*) FROM {source_ref(table, snapshot)} t\n{join_sql}\nWHERE {where}"

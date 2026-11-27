@@ -42,6 +42,7 @@ It is built for the hard version of the job: thousands of tables, petabytes of d
 - **Splits large tables into even chunks.** Ranges of a date or integer key are packed to a target size: whole months where they fit, days where a month is too big. The chunk column comes from the table's clustering key, so every chunk prunes, and the predicates cover every possible value, including NULL.
 - **Detokenizes restricted columns** through a cross-reference table, with checks that the join neither drops nor duplicates rows.
 - **Reconciles before release.** A manifest is written only when the unloaded row count equals the source count and a fingerprint of every value, read back from the files, equals the source's. Timestamps that would lose digits below a millisecond fail unless you accept it. The receiving side loads only what has a manifest.
+- **Extracts live tables consistently.** Tables still being written are read as of one snapshot through Snowflake time travel, so every chunk comes from the same moment and reconciles however much the table changes. The planner checks each table's retention first.
 - **Restarts at chunk level.** Every table or chunk is a tracked work item.
 - **Registers open table formats.** `lakefreight register` turns a table's unloaded files into a Delta Lake or Apache Iceberg table without rewriting them. Only files named in a committed manifest are included; it refuses incomplete tables, files still replicating, schema drift between chunks, and nanosecond timestamps that Spark and Iceberg v2 can't read. With `--update`, a re-extracted or late chunk replaces or joins an existing table in one commit.
 
@@ -170,7 +171,7 @@ The repo includes a [Claude Code skill](https://github.com/sidbhaumik/lakefreigh
 
 ## Not included
 
-- Replication tracking, egress purge, and the delta pass for tables that change during the migration.
+- Replication tracking, egress purge, and the delta pass for rows that change after a table's snapshot.
 
 ## Contributing
 

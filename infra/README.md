@@ -64,6 +64,7 @@ Edit `terraform.tfvars`:
 - `service_user_public_key`: the body of `lakefreight_key.pub`, on one line, without the `BEGIN` and `END` lines
 - `xref_table`: only if you detokenize restricted columns. Keep it outside the source databases; the plan fails if it isn't.
 - `replication`: only if you replicate to a receiving account (step 9)
+- `snapshot` and `snapshot_window_hours`: which tables are read as of one snapshot through time travel (default: those with `STILL_WRITTEN` set), and how long their extract may run
 - `allow_timestamp_precision_loss`: leave `false` to fail chunks whose timestamps would lose digits below a millisecond; set `true` if milliseconds are enough
 
 `variables.tf` lists every option, including warehouse sizes and concurrency per lane.

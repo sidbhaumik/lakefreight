@@ -199,3 +199,14 @@ def test_old_month_profiles_still_read(tmp_path):
     assert generate.read_profiles(old) == {
         ("TRAVEL", "BOOKINGS", "RESERVATION"): [(date(2022, 1, 1), 10), (None, 1)]
     }
+
+
+def test_offline_plan_can_pin_a_snapshot(tmp_path):
+    tables = generate.read_metadata(METADATA)
+    summary = generate.generate(
+        tables, generate.read_profiles(PROFILES), settings, tmp_path, snapshot="2026-01-31 12:00:00"
+    )
+    sql = (tmp_path / by_table(summary, "RESERVATION")[0]["file"]).read_text()
+    assert sql.count("AT(TIMESTAMP => '2026-01-31 12:00:00 +00:00'::TIMESTAMP_TZ)") == 4
+    profile = (tmp_path / by_table(summary, "CLICK_EVENTS")[0]["file"]).read_text()
+    assert "AT(TIMESTAMP =>" in profile

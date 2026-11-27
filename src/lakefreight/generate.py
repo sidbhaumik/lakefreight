@@ -216,17 +216,18 @@ def read_profiles(
     return profiles
 
 
-def _statements(meta: TableMeta, chunk, run_id: str, settings: Settings) -> str:
+def _statements(meta: TableMeta, chunk, run_id: str, settings: Settings, snapshot=None) -> str:
     spec = meta.spec
     parts = [
         f"-- {spec.path} chunk {chunk.chunk_id} ({spec.zone})",
         "-- 1. Unload",
-        renderer.unload_sql(spec, chunk.predicate, chunk.chunk_id, run_id, settings) + ";",
+        renderer.unload_sql(spec, chunk.predicate, chunk.chunk_id, run_id, settings, snapshot)
+        + ";",
         "-- 2. Source row count: must equal the rows unloaded",
-        renderer.source_count_sql(spec, chunk.predicate) + ";",
+        renderer.source_count_sql(spec, chunk.predicate, snapshot) + ";",
     ]
     step = 3
-    unmatched = renderer.unmatched_sql(spec, chunk.predicate, settings)
+    unmatched = renderer.unmatched_sql(spec, chunk.predicate, settings, snapshot)
     if unmatched:
         parts += [
             f"-- {step}. Tokens with no xref match: must be within the threshold",
@@ -243,7 +244,7 @@ def _statements(meta: TableMeta, chunk, run_id: str, settings: Settings) -> str:
     )
     parts += [
         f"-- {step}. Fingerprint of the values as unloaded.{note}",
-        renderer.source_values_sql(spec, chunk.predicate, settings) + ";",
+        renderer.source_values_sql(spec, chunk.predicate, settings, snapshot) + ";",
         f"-- {step + 1}. The same fingerprint, read back from the unloaded files. ROW_COUNT must "
         f"equal the rows unloaded, and VALUE_HASH the VALUE_HASH of step {step}.",
         renderer.staged_values_sql(spec, chunk.chunk_id, run_id, settings) + ";",
@@ -257,8 +258,12 @@ def generate(
     settings: Settings,
     out_dir: str | Path,
     run_id: str = "manual",
+    snapshot: str | None = None,
 ) -> list[dict]:
-    """Write the SQL files and return the summary rows."""
+    """Write the SQL files and return the summary rows. With a snapshot (a UTC
+    timestamp), every table is read as of that instant, through time travel."""
+    if snapshot is not None:
+        renderer.snapshot_literal(snapshot)  # refuse a malformed snapshot before writing
     out_dir = Path(out_dir)
     summary: list[dict] = []
     for meta in tables:
@@ -295,7 +300,7 @@ def generate(
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(
                     f"-- Run this, save the result, and pass it with --profiles.\n"
-                    f"{chunk_planner.profile_sql(spec.source_fqn, meta.chunk_column, meta.chunk_kind)};\n"
+                    f"{chunk_planner.profile_sql(renderer.source_ref(spec, snapshot), meta.chunk_column, meta.chunk_kind)};\n"
                 )
                 check = (
                     f"chunk column {meta.chunk_column} leads the clustering key"
@@ -323,7 +328,7 @@ def generate(
             for chunk in chunks:
                 target = out_dir / rel_dir / f"{chunk.chunk_id}.sql"
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(_statements(meta, chunk, run_id, settings))
+                target.write_text(_statements(meta, chunk, run_id, settings, snapshot))
                 extra = (
                     ["far above target size; consider a finer split"]
                     if chunk.chunk_id in big
@@ -357,12 +362,16 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
         help="settings TOML (default: $LAKEFREIGHT_CONFIG, ./lakefreight.toml, or built-in defaults)",
     )
     parser.add_argument("--run-id", default="manual", help="run id used in the unload path")
+    parser.add_argument(
+        "--snapshot",
+        help="read every table as of this UTC timestamp, e.g. '2026-01-31 12:00:00' (time travel)",
+    )
     args = parser.parse_args(argv)
 
     settings = load_settings(args.config)
     tables = read_metadata(args.metadata)
     profiles = read_profiles(args.profiles) if args.profiles else {}
-    summary = generate(tables, profiles, settings, args.out, args.run_id)
+    summary = generate(tables, profiles, settings, args.out, args.run_id, args.snapshot)
 
     by_status = Counter(r["status"] for r in summary)
     by_zone = Counter(r["zone"] for r in summary if r["status"] == "READY")

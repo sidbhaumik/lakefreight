@@ -81,7 +81,12 @@ def submit(event, _context=None):
         cur, settings, item["DATABASE_NAME"], item["SCHEMA_NAME"], item["TABLE_NAME"]
     )
     run_id = uuid.uuid4().hex  # new prefix per attempt, so retries never mix files
-    sql = renderer.unload_sql(table, item["PREDICATE"], item["CHUNK_ID"], run_id, settings)
+    # A pinned table is read as of its snapshot, so every chunk and every retry
+    # sees the same data however much the live table changes.
+    snapshot = item["SNAPSHOT_TS"]
+    sql = renderer.unload_sql(
+        table, item["PREDICATE"], item["CHUNK_ID"], run_id, settings, snapshot
+    )
     cur.execute_async(sql)
     query_id = cur.sfqid
     update_work_item(
@@ -91,7 +96,6 @@ def submit(event, _context=None):
         STATUS="RUNNING",
         RUN_ID=run_id,
         QUERY_ID=query_id,
-        SNAPSHOT_TS=datetime.now(UTC).replace(tzinfo=None),
         ATTEMPTS=int(item["ATTEMPTS"] or 0) + 1,
         LAST_ERROR=None,
     )
@@ -153,18 +157,19 @@ def reconcile(event, _context=None):
         ]
         rows_unloaded = sum(f["rows"] for f in files)
 
-        cur.execute(renderer.source_count_sql(table, item["PREDICATE"]))
+        snapshot = item["SNAPSHOT_TS"]
+        cur.execute(renderer.source_count_sql(table, item["PREDICATE"], snapshot))
         source_rows = int(cur.fetchone()[0])
 
         unmatched = None
-        unmatched_sql = renderer.unmatched_sql(table, item["PREDICATE"], settings)
+        unmatched_sql = renderer.unmatched_sql(table, item["PREDICATE"], settings, snapshot)
         if unmatched_sql:
             cur.execute(unmatched_sql)
             unmatched = int(cur.fetchone()[0])
 
         # Values, not just counts: fingerprint the source as unloaded and the files
         # as written, and count timestamps that lose digits below a millisecond.
-        cur.execute(renderer.source_values_sql(table, item["PREDICATE"], settings))
+        cur.execute(renderer.source_values_sql(table, item["PREDICATE"], settings, snapshot))
         source_values = cur.fetchone()
         source_hash = int(source_values[0] or 0)
         sub_ms = {
@@ -211,7 +216,7 @@ def reconcile(event, _context=None):
             item["CHUNK_ID"],
             event["run_id"],
             item["PREDICATE"],
-            str(item["SNAPSHOT_TS"]) if item["SNAPSHOT_TS"] else None,
+            str(snapshot) if snapshot else None,
             files,
             rows_unloaded,
             chunks_in_table=chunks_in_table,

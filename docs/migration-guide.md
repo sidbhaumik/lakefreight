@@ -181,7 +181,12 @@ By default a chunk whose timestamps have digits finer than a millisecond fails, 
 
 Track daily unloaded volume against the design rate with the `EXTRACT_PROGRESS` view.
 
-If source tables are still being written, extract from a zero-copy clone so that a table's chunks are consistent with each other, and record the snapshot time for the delta pass.
+If source tables are still being written, set `STILL_WRITTEN = TRUE` on them in `EXTRACT_CONFIG` before planning. The planner then takes one snapshot, a UTC instant, and every query for those tables reads as of it through time travel: the profile, each chunk's unload, and every reconciliation check, retries included. All their chunks come from the same moment, and the extract reconciles however much the live table changes. Tables planned in the same run share the snapshot, so related tables stay consistent with each other.
+
+- `snapshot = "all"` pins every table, and `"none"` turns pinning off.
+- Time travel only reaches back as far as each table's retention: 1 day by default, up to 90 on Enterprise edition. The planner refuses a pinned table whose retention is shorter than `snapshot_window_hours` (12 by default), before it plans anything. Raise the table's `DATA_RETENTION_TIME_IN_DAYS` for the migration, lower the window, or extract from a zero-copy clone by setting `SOURCE_DATABASE`.
+- The snapshot is recorded in each work item and manifest. Rows changed after it are what a delta pass must pick up.
+- With `lakefreight plan`, pass `--snapshot '2026-01-31 12:00:00'` (UTC) to pin the generated SQL.
 
 ## 9. Transfer to the target account
 
@@ -270,7 +275,7 @@ To register the files in place as an external table instead, the bucket must be 
 | Tokenized chunk | Unmatched tokens within threshold |
 | Project | One report row per table: source rows, extracted rows, files, bytes, status |
 
-Then purge the egress buckets, drop any clones, and hand over the snapshot times and per-chunk counts for the delta pass.
+Then purge the egress buckets, drop any clones, and hand over the snapshot times and per-chunk counts for the delta pass. Reset any retention you raised for time travel.
 
 ## 12. Common mistakes
 
@@ -289,3 +294,4 @@ Then purge the egress buckets, drop any clones, and hand over the snapshot times
 | Reconciling on row counts only | A wrong cast or a broken join keeps the count and passes | Comparing a fingerprint of the values on both sides |
 | Building a table from every file in the folder | Files from failed attempts appear as duplicate rows | Registering only files named in a manifest |
 | Releasing files before reconciling | The receiver loads partial data | Writing the manifest last |
+| Extracting a table that is still written without a snapshot | Chunks come from different moments, and reconciliation fails or misses moved rows | Setting `STILL_WRITTEN` so every query reads as of one snapshot |

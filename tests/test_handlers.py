@@ -235,3 +235,59 @@ def test_staged_check_reads_this_attempts_files(monkeypatch):
     assert len(staged) == 1
     assert "/CLICK_EVENTS/chunk=0001_202501_202501/run_id=r1/" in staged[0]
     assert "LAKEFREIGHT_PARQUET" in staged[0]
+
+
+def test_pinned_item_reads_every_query_at_its_snapshot(monkeypatch):
+    from datetime import datetime
+
+    holder = {}
+    original = FakeCursor.__init__
+
+    def keep(self, *a, **kw):
+        original(self, *a, **kw)
+        holder["cur"] = self
+
+    monkeypatch.setattr(FakeCursor, "__init__", keep)
+    monkeypatch.setitem(ITEM, "SNAPSHOT_TS", datetime(2026, 11, 27, 20, 0, 0))
+    out, written = run(monkeypatch, FILE, 50)
+    assert out["state"] == "RECONCILED"
+    source_reads = [q for q in holder["cur"].sql if "CLICK_EVENTS" in q and "FROM @" not in q]
+    assert source_reads and all(
+        "AT(TIMESTAMP => '2026-11-27 20:00:00.000000 +00:00'::TIMESTAMP_TZ)" in q
+        for q in source_reads
+    )
+    assert manifest_of(written)["snapshot_ts"] == "2026-11-27 20:00:00"
+
+
+def test_submit_keeps_the_planned_snapshot(monkeypatch):
+    executed, updates = [], {}
+
+    class Cur:
+        sfqid = "q1"
+
+        def execute_async(self, sql):
+            executed.append(sql)
+
+    monkeypatch.setattr(
+        handlers,
+        "_connect_for",
+        lambda *a: type("C", (), {"cursor": lambda s: Cur(), "close": lambda s: None})(),
+    )
+    monkeypatch.setattr(
+        handlers,
+        "get_work_item",
+        lambda *a: {
+            **ITEM,
+            "ZONE": "INTERNAL",
+            "LANE": "SMALL",
+            "ATTEMPTS": 0,
+            "SNAPSHOT_TS": "2026-11-27 20:00:00",
+        },
+    )
+    monkeypatch.setattr(handlers, "load_table_spec", lambda *a: SPEC)
+    monkeypatch.setattr(
+        handlers, "update_work_item", lambda cur, settings, wid, **f: updates.update(f)
+    )
+    handlers.submit({"work_item_id": "x"})
+    assert "AT(TIMESTAMP => '2026-11-27 20:00:00 +00:00'::TIMESTAMP_TZ)" in executed[0]
+    assert "SNAPSHOT_TS" not in updates

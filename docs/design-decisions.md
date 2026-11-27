@@ -128,6 +128,14 @@ The loss is not silent. Reconciliation counts the values in each timestamp colum
 
 **Why.** A count catches dropped and duplicated rows, but not changed values: a wrong cast, a timezone shift, a broken detokenizing join, or timestamps cut to the millisecond all keep the count and pass. `HASH_AGG` is order-independent and covers every row and column, and running both sides in Snowflake means one engine reads both, with no rows leaving it. Reading the files back through the zone's own stage uses the same role and key that wrote them. The extra cost is one scan of the chunk's source and one read of its files.
 
+## 17. Tables still being written are read as of one snapshot
+
+**Decision.** For tables flagged `STILL_WRITTEN` (or every table, with `snapshot = "all"`), the planner takes one UTC snapshot per run. The profile, every unload and every reconciliation query read `AT(TIMESTAMP => snapshot)`. The planner first checks that each pinned table's time-travel retention covers `snapshot_window_hours`, and refuses before planning anything if not.
+
+**Rejected.** Reading the live table; a zero-copy clone per table as the only option.
+
+**Why.** Chunks of a large table are unloaded hours apart. Read live, a row updated in between can land in two chunks or in none, while each chunk still reconciles; and rows that change between a chunk's unload and its reconciliation make good chunks fail. Time travel gives every query for a table the same moment with no extra storage or setup, and one snapshot for the whole run keeps related tables consistent too. Clones remain the fallback when retention cannot cover the extract.
+
 ## Known gaps
 
 - Large tables whose clustering key leads with neither a date nor an integer, such as a text code, run as one `COPY`.
@@ -135,5 +143,5 @@ The loss is not silent. Reconciliation counts the values in each timestamp colum
 - `infra/terraform` has been applied to a live AWS account and run end to end, with Snowflake writing into S3 through the zone roles. Cross-account replication is still untested.
 - Snowflake's Parquet unload keeps timestamps only to the millisecond. Columns that need finer precision have no lossless path yet.
 - Registered Delta tables have been read back in Databricks SQL, and Delta and Iceberg tables with delta-rs, pyiceberg and DuckDB, all from a live Snowflake unload. Iceberg in Databricks, and either format in Snowflake, Redshift or BigQuery, is untested.
-- Like the row count, the value check reads the source after the unload, so a source table still being written can fail it. Extract from a zero-copy clone, as the migration guide says.
+- A table still being written but not flagged `STILL_WRITTEN` is read live, so its chunks can come from different moments and reconciliation can fail. Rows changed after a snapshot need a delta pass, which is not built yet.
 - `register --update` writes the Delta log without a lock, so it relies on one registration per table at a time. Updated Delta tables have been read in Databricks SQL and with delta-rs.

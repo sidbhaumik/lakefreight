@@ -5,6 +5,8 @@ locals {
     target_chunk_bytes        = var.target_chunk_bytes
     unmatched_token_threshold = var.unmatched_token_threshold
     allow_precision_loss      = var.allow_timestamp_precision_loss
+    snapshot                  = var.snapshot
+    snapshot_window_hours     = var.snapshot_window_hours
     xref_table                = var.xref_table == "" ? "NONE.NONE.NONE" : var.xref_table
     xref_token_column         = var.xref_token_column
     xref_clear_column         = var.xref_clear_column

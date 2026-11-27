@@ -57,6 +57,10 @@ class Settings:
     parquet_file_format: str = ""
     # Accept timestamps losing digits finer than a millisecond (Snowflake's Parquet limit).
     allow_timestamp_precision_loss: bool = False
+    # Which tables are read as of one snapshot (time travel): none, still_written or all.
+    snapshot: str = "still_written"
+    # How long after planning the extract of a pinned table may still be running.
+    snapshot_window_hours: float = 12.0
 
 
 def config_source(path: str | Path | None = None) -> Path | None:
@@ -103,4 +107,15 @@ def load_settings(path: str | Path | None = None) -> Settings:
             "parquet_file_format", f"{ex['control_schema']}.LAKEFREIGHT_PARQUET"
         ),
         allow_timestamp_precision_loss=bool(ex.get("allow_timestamp_precision_loss", False)),
+        snapshot=_snapshot_mode(ex.get("snapshot", "still_written")),
+        snapshot_window_hours=float(ex.get("snapshot_window_hours", 12)),
     )
+
+
+SNAPSHOT_MODES = ("none", "still_written", "all")
+
+
+def _snapshot_mode(value: str) -> str:
+    if value not in SNAPSHOT_MODES:
+        raise ValueError(f"extract.snapshot must be one of {SNAPSHOT_MODES}, not {value!r}")
+    return value

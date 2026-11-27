@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS EXTRACT_CONFIG (
     CHUNK_COLUMN         STRING,                   -- date, timestamp or integer column for CHUNKED tables
     CHUNK_COLUMN_SOURCE  STRING,                   -- CLUSTERING_KEY | HEURISTIC | REVIEWED
     SOURCE_DATABASE      STRING,                   -- set to a zero-copy clone database to extract from it
-    STILL_WRITTEN        BOOLEAN       DEFAULT FALSE,
+    STILL_WRITTEN        BOOLEAN       DEFAULT FALSE,  -- TRUE: read as of one snapshot (time travel) while still being written
     ENABLED              BOOLEAN       DEFAULT TRUE,
     UPDATED_AT           TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
     CONSTRAINT PK_EXTRACT_CONFIG PRIMARY KEY (DATABASE_NAME, SCHEMA_NAME, TABLE_NAME)
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS EXTRACT_WORK_ITEM (
     STATUS            STRING        DEFAULT 'PENDING',  -- PENDING | RUNNING | RECONCILED | REPLICATED | ACKED | FAILED
     RUN_ID            STRING,
     QUERY_ID          STRING,
-    SNAPSHOT_TS       TIMESTAMP_NTZ,
+    SNAPSHOT_TS       TIMESTAMP_NTZ,                -- UTC instant every query reads at (time travel); NULL: read live
     ROWS_UNLOADED     NUMBER(38,0),
     SOURCE_ROWS       NUMBER(38,0),
     FILE_COUNT        NUMBER,

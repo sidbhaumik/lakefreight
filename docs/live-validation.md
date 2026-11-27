@@ -60,6 +60,19 @@ A 100-row token cross-reference sat in a separate database.
 - Reads from Spark or Databricks, Snowflake external tables, Redshift and BigQuery.
 - Snowflake's own sensitive data classification. Classification results take hours to reach `ACCOUNT_USAGE`, so this run used column-name rules.
 
+# Snapshots under concurrent writes
+
+On 2026-11-27 a 2-million-row table, clustered on an integer key, was planned twice in the Snowflake trial: once flagged `STILL_WRITTEN` with `snapshot = "still_written"`, and once with `snapshot = "none"` as a control. Each plan was extracted through the real `submit`, `poll` and `reconcile` handlers while a second connection kept updating, deleting and inserting rows across the whole key range, pausing 3 seconds between each unload and its reconciliation.
+
+| Run | Writes during the run | Result |
+|---|---|---|
+| Pinned | 42 statements | All 3 chunks reconciled. They held exactly 2,000,000 rows, the table's count at the snapshot, while the live table had moved to 1,999,384 |
+| Unpinned | 60 statements | A chunk failed with `row count mismatch: unloaded 1048398, source 1048440`: rows changed between its unload and its reconciliation |
+
+All work items of the pinned plan shared one snapshot, and its profile query read at it too. With the table's retention set to 0 days, and then to 1 day against a 30-hour window, the planner refused it with the retention, the window and the remedies in the message, and created no work items.
+
+No bugs. The test database was dropped afterwards.
+
 # Value reconciliation
 
 On 2026-11-27 the demo tables were recreated with two more: one holding every column type the renderer handles (17, from `BINARY` and `GEOGRAPHY` to `TIMESTAMP_TZ`), and one with timestamps before 1970 that have sub-millisecond digits. They were discovered, seeded and planned into 20 work items. The real `submit`, `poll` and `reconcile` handlers then ran against the Snowflake trial, unloading to internal stages and keeping manifests in memory.
