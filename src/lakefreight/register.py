@@ -25,6 +25,8 @@ import uuid
 from dataclasses import dataclass, field, replace
 from urllib.parse import quote, unquote
 
+from .reconcile import FORMAT_VERSION
+
 MANIFEST = "manifest.json"
 DELTA_LOG = "_delta_log"
 
@@ -107,6 +109,12 @@ def collect(fs, root: str, allow_partial: bool = False) -> Collected:
     for path in manifest_paths:
         with fs.open_input_stream(path) as f:
             manifest = json.loads(f.read())
+        version = manifest.get("format_version", 1)
+        if not isinstance(version, int) or version > FORMAT_VERSION:
+            raise RegistrationError(
+                f"{path} has format_version {version!r}; this lakefreight reads up to "
+                f"{FORMAT_VERSION}. Upgrade lakefreight to register it."
+            )
         chunk = str(manifest["chunk_id"])
         by_chunk.setdefault(chunk, []).append((path, manifest))
         folder = posixpath.relpath(posixpath.dirname(path), root)

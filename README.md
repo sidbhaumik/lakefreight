@@ -136,7 +136,7 @@ The [migration guide](https://github.com/sidbhaumik/lakefreight/blob/main/docs/m
 | **Verified readers** | Databricks SQL (Delta), delta-rs, pyiceberg, DuckDB | Iceberg in Databricks; Snowflake, Redshift and BigQuery reads |
 | **Orchestration** | AWS Step Functions, deployed with Terraform or OpenTofu | |
 
-Version 0.9 covers the Snowflake-to-S3 path end to end, and every stage has run on live services except cross-account replication. It has not yet run a production-scale migration.
+Version 1.0 covers the Snowflake-to-S3 path end to end, and every stage has run on live services except cross-account replication. It has not yet run a production-scale migration. From 1.0, the command line, settings, control tables, output layout and manifests are stable: every 1.x release keeps a migration in progress working. [Compatibility](https://github.com/sidbhaumik/lakefreight/blob/main/docs/compatibility.md) says exactly what is covered.
 
 - **Out of scope by design:** continuous replication. lakefreight moves each table as of one point in time; it is not a sync tool.
 - **Platform limit:** Snowflake's Parquet unload keeps timestamps only to the millisecond. lakefreight detects the loss and fails the chunk, but cannot avoid it.
@@ -151,6 +151,7 @@ Version 0.9 covers the Snowflake-to-S3 path end to end, and every stage has run 
 | [Migration guide](https://github.com/sidbhaumik/lakefreight/blob/main/docs/migration-guide.md) | You have a migration to run and want the method, step by step |
 | [Design decisions](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md) | You want to know why it is built this way, and what was rejected |
 | [Live validation](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md) | You want to see what was proven on real accounts, and what each run found |
+| [Compatibility](https://github.com/sidbhaumik/lakefreight/blob/main/docs/compatibility.md) | You want to know what stays stable across 1.x releases, and how to upgrade mid-migration |
 | [Infrastructure](https://github.com/sidbhaumik/lakefreight/blob/main/infra/README.md) | You want to deploy the pipeline with Terraform |
 | [Changelog](https://github.com/sidbhaumik/lakefreight/blob/main/CHANGELOG.md) | You want to see what changed in each release |
 

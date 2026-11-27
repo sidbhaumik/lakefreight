@@ -66,6 +66,31 @@ def table_root(tmp_path):
     return root
 
 
+def _rewrite_manifests(root, change):
+    for path in root.rglob("manifest.json"):
+        manifest = json.loads(path.read_text())
+        change(manifest)
+        path.write_text(json.dumps(manifest))
+
+
+def test_manifests_carry_a_format_version(table_root):
+    manifest = json.loads(next(table_root.rglob("manifest.json")).read_text())
+    assert manifest["format_version"] == 1
+
+
+def test_manifests_from_before_1_0_still_register(table_root):
+    _rewrite_manifests(table_root, lambda m: m.pop("format_version"))
+    fs, root = open_root(str(table_root))
+    assert collect(fs, root).rows == 10
+
+
+def test_a_newer_manifest_format_is_refused(table_root):
+    _rewrite_manifests(table_root, lambda m: m.update(format_version=2))
+    fs, root = open_root(str(table_root))
+    with pytest.raises(RegistrationError, match="format_version 2; this lakefreight reads up to 1"):
+        collect(fs, root)
+
+
 def test_collect_picks_latest_run_and_ignores_unmanifested_files(table_root):
     fs, root = open_root(str(table_root))
     collected = collect(fs, root)

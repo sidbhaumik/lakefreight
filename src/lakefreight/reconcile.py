@@ -6,6 +6,10 @@ from datetime import UTC, datetime
 
 from .models import TableSpec
 
+# Version of the manifest and schema file layout. Readers refuse a newer one.
+# Files without the field, written before 1.0, are version 1.
+FORMAT_VERSION = 1
+
 
 def evaluate(
     rows_unloaded: int,
@@ -65,6 +69,7 @@ def build_manifest(
     """`files` entries are {"name", "size", "rows"}; names are relative to the
     manifest's own folder. `chunks_in_table` lets a reader check completeness."""
     return {
+        "format_version": FORMAT_VERSION,
         "database": table.database,
         "schema": table.schema,
         "table": table.table,
@@ -87,6 +92,7 @@ def build_manifest(
 def build_schema(table: TableSpec) -> dict:
     """Sidecar the target uses to create tables and reapply tags."""
     return {
+        "format_version": FORMAT_VERSION,
         "database": table.database,
         "schema": table.schema,
         "table": table.table,
