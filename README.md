@@ -6,98 +6,63 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/sidbhaumik/lakefreight/blob/main/LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230)](https://github.com/astral-sh/ruff)
 
-**Bulk-move warehouse tables into open lakehouse files on cloud storage, so any engine can read them.**
+**Move Snowflake tables into open lakehouse files on S3, and prove that every row and value arrived intact.**
 
-lakefreight unloads thousands of tables from a source warehouse into Parquet files on object storage, in a layout that Databricks, Snowflake, Redshift and BigQuery can all load or query. It plans the work from your metadata, keeps sensitive data in separate zones, and reconciles every extract before it is released.
+Moving a data warehouse out of Snowflake is easy to start and hard to trust. With thousands of tables, the questions that matter are: did every row arrive, are the values unchanged, did personal data stay where it belongs, and can any engine read the result?
 
-It is built for the hard version of the job: thousands of tables, petabytes of data, many years of history, a fixed deadline, and a hand-off to storage owned by another cloud account in another region. The same method works for much smaller moves.
-
-## Support matrix
-
-| | Supported today | On the roadmap |
-|---|---|---|
-| **Source** | Snowflake | Other warehouses |
-| **Target storage** | Amazon S3 | Google Cloud Storage, Azure Data Lake Storage |
-| **File format** | Parquet, with a manifest and schema sidecar per table | |
-| **Table format** | Delta Lake or Apache Iceberg, registered over the same Parquet files without rewriting them, and updated in place when chunks are re-extracted | |
-| **Readers** | Any engine that reads Parquet, Delta or Iceberg: Databricks, Snowflake, Redshift, BigQuery | One-step registration in each engine's catalog |
-| **Orchestration** | AWS Step Functions, deployed with Terraform or OpenTofu | |
-
-**Status:** alpha. The Snowflake path (discover, plan, unload, reconcile, register as Delta and Iceberg) has been [run end to end on a live Snowflake account](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md), with every table read back at exactly Snowflake's row counts. The Delta tables were [read back in Databricks](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md#read-back-in-databricks) with identical counts and values. The [AWS deployment](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md#live-deployment-on-aws) ran end to end: Snowflake unloaded into S3 through the zone roles, and the tables were registered and read back from S3.
-
-**Known limitation:** Snowflake writes Parquet timestamps in milliseconds, so finer digits are lost on unload.
-
-## What it does
-
-![lakefreight architecture: metadata drives a chunk planner and work items; Snowflake unloads Parquet into sensitivity zones; reconciled chunks get a manifest, are replicated to the target account, and are registered as Delta Lake or Iceberg tables](https://raw.githubusercontent.com/sidbhaumik/lakefreight/main/docs/architecture.svg)
-
-- **Discovers your tables.** `lakefreight discover` reads sizes, columns and types from Snowflake, and flags personal data using Snowflake's own sensitive data classification plus any tags or column-name rules you add. Columns Snowflake has never classified are treated as sensitive.
-- **Generates extract SQL from metadata.** One `COPY INTO` per table, or per date chunk for large tables. Nothing is hand-written.
-- **Routes by sensitivity.** Three zones, each with its own stage, bucket location, key and role:
-  - `RESTRICTED`: tables with tokenized identifiers, such as government ID numbers, that must leave in clear form
-  - `PII`: tables with other personal data
-  - `INTERNAL`: tables explicitly classified as non-sensitive
-
-  Unknown classification is treated as sensitive.
-- **Splits large tables into even chunks.** Ranges of a date or integer key are packed to a target size: whole months where they fit, days where a month is too big. The chunk column comes from the table's clustering key, so every chunk prunes, and the predicates cover every possible value, including NULL.
-- **Detokenizes restricted columns** through a cross-reference table, with checks that the join neither drops nor duplicates rows.
-- **Reconciles before release.** A manifest is written only when the unloaded row count equals the source count and a fingerprint of every value, read back from the files, equals the source's. Timestamps that would lose digits below a millisecond fail unless you accept it. The receiving side loads only what has a manifest.
-- **Extracts live tables consistently.** Tables still being written are read as of one snapshot through Snowflake time travel, so every chunk comes from the same moment and reconciles however much the table changes. The planner checks each table's retention first.
-- **Restarts at chunk level.** Every table or chunk is a tracked work item.
-- **Registers open table formats.** `lakefreight register` turns a table's unloaded files into a Delta Lake or Apache Iceberg table without rewriting them. Only files named in a committed manifest are included; it refuses incomplete tables, files still replicating, schema drift between chunks, and nanosecond timestamps that Spark and Iceberg v2 can't read. With `--update`, a re-extracted or late chunk replaces or joins an existing table in one commit.
-
-## Install
+lakefreight answers them. It plans the extract from your metadata, has Snowflake write Parquet straight to S3 in separate sensitivity zones, and checks every chunk before releasing it. Chunks that pass are registered as Delta Lake or Apache Iceberg tables that Databricks, Snowflake, Redshift and BigQuery can read.
 
 ```bash
 pip install lakefreight
 ```
 
-Add the extra for the table format you want to register:
+![lakefreight architecture: metadata drives a chunk planner and work items; Snowflake unloads Parquet into sensitivity zones; reconciled chunks get a manifest, are replicated to the target account, and are registered as Delta Lake or Iceberg tables](https://raw.githubusercontent.com/sidbhaumik/lakefreight/main/docs/architecture.svg)
 
-```bash
-pip install "lakefreight[delta]"
-```
+## Proven on live services
 
-```bash
-pip install "lakefreight[iceberg]"
-```
+Each stage of the pipeline has been run against a real Snowflake account, a real AWS account and a Databricks workspace, not just unit tests. [Live validation](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md) records each run: what was tested, the numbers, and what it found.
 
-To read metadata straight from Snowflake, add the connector:
+| What was tested | Result |
+|---|---|
+| Full pipeline on AWS: 102 resources from Terraform, Snowflake writing to S3 through Step Functions and Lambda | All 18 work items reconciled; each zone's files encrypted with its own KMS key |
+| Values, not just row counts, across 17 column types | Source and file fingerprints matched. Changing one email, swapping two names, or a bad unload with the right row count were all caught |
+| A 2-million-row table extracted while a second session kept writing to it | Pinned to one snapshot, every chunk reconciled exactly. The unpinned control run failed, as expected |
+| A 10-million-row table with no date column, and a month holding 80% of a table | Every row fell in exactly one chunk, and every chunk query pruned partitions |
+| Delta tables read in Databricks SQL, including time travel and file skipping | Identical row counts and values; a three-month filter read 3 of 12 files |
+| A deliberate failure: 3 tokens missing from the cross-reference | The lane failed, the chunk got no manifest, and registration refused the table until a retry fixed it |
 
-```bash
-pip install "lakefreight[snowflake]"
-```
+### What live testing caught
 
-Then create a settings file to edit, and run `lakefreight --help` for the commands:
+The offline tests passed in every case below. Running against real services found the problem, and each is now fixed and covered by a test.
 
-```bash
-lakefreight config --write
-```
+- **A security gap between sensitivity zones.** Snowflake turns on all of a user's granted roles as secondary roles by default, so a session opened for non-sensitive data could also read the personal-data stages. Fixed in Terraform and in every connection ([0.5.1](https://github.com/sidbhaumik/lakefreight/blob/main/CHANGELOG.md#051---2026-11-26)).
+- **Silent precision loss.** Snowflake's Parquet writer keeps only milliseconds, and moves pre-1970 timestamps *forward* in time. Row counts could not see this. Value fingerprints now catch it and fail the chunk by default.
+- **A personal-data detector that matched almost nothing.** Snowflake's `REGEXP_LIKE` matches the whole string, while DuckDB, used in the tests, matches anywhere. A rule for `PASSPORT` missed `PASSPORT_NUMBER`.
+- **A pipeline that reported success when every item failed.** The Step Functions run now fails with `LaneHadFailures`.
 
-## Typical workflow
+## How it works
 
-1. **Discover** the tables and their sensitivity. This uses a connection from `~/.snowflake/connections.toml`; add `--sql-only` to get the query and run it yourself instead.
+1. **Discover.** `lakefreight discover` reads table sizes, columns, clustering keys and Snowflake's own sensitive-data classification. Columns nobody has classified are treated as sensitive.
+2. **Plan.** Each table becomes one `COPY INTO`, or one per chunk for large tables, routed to the `RESTRICTED`, `PII` or `INTERNAL` zone. Each zone has its own stage, bucket, KMS key and Snowflake role, so a routing mistake causes a permission error, not a leak.
+3. **Unload and reconcile.** Snowflake writes the Parquet; Python only coordinates, through Step Functions. A chunk gets a manifest only if its row count, its unmatched-token count and a fingerprint of every value all match the source.
+4. **Register.** `lakefreight register` writes Delta Lake or Iceberg metadata over the files, without copying them, including only chunks with a manifest. `--update` replaces re-extracted chunks in one commit.
 
-   ```bash
-   lakefreight discover --database SALES --database HR --out metadata.csv
-   ```
+## Engineering highlights
 
-2. **Plan** the work: one `COPY INTO` per table or date chunk, routed by zone.
+Each of these has a written decision record in [design decisions](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md), with the alternatives that were rejected.
 
-   ```bash
-   lakefreight plan --metadata metadata.csv --out generated
-   ```
+- **Reconciliation that compares values.** A `HASH_AGG` fingerprint of the source, computed with the same expressions and joins as the unload, must equal the fingerprint of the files read back through the stage. It models Snowflake's timestamp truncation exactly, so the two sides agree bit for bit. ([16](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#16-reconciliation-compares-values-not-just-counts))
+- **Consistent extracts from tables still being written.** Every query for a run, including retries, reads one Snowflake time-travel snapshot. The planner checks each table's retention first, and refuses tables that could expire mid-extract. ([17](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#17-tables-still-being-written-are-read-as-of-one-snapshot))
+- **Sensitivity that fails closed.** Only an explicit "not sensitive" sends a table to the `INTERNAL` zone; a missing or unknown classification is treated as sensitive. Isolation is enforced by Snowflake and IAM privileges, not by the code taking the right branch. ([3](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#3-three-zones-enforced-by-privileges), [4](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#4-sensitivity-fails-closed))
+- **A chunk planner with no gaps.** Ranges of a date or integer key are packed to a target size: whole months where they fit, days where they don't. Open-ended first and last ranges and a NULL chunk cover every possible value. The chunk column comes from the clustering key, so every chunk prunes. ([5–7](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#5-chunks-are-packed-to-a-size-not-fixed-to-a-calendar-period))
+- **Open table formats without rewriting data.** Delta logs carry per-file column statistics from the Parquet footers so engines can skip files. Iceberg goes through pyiceberg. Registration refuses incomplete tables, schema drift and files still replicating. ([13](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#13-table-formats-are-registered-over-the-unloaded-files))
+- **Infrastructure for both clouds in one module.** Terraform creates the S3 buckets, KMS keys, IAM roles, Lambda functions and Step Functions on AWS, and the warehouses, roles, storage integrations, stages and key-pair service user on Snowflake. Its tests check the access policies with a mocked Snowflake. ([15](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#15-infrastructure-is-terraform-covering-both-aws-and-snowflake))
 
-3. **Unload** with the generated SQL, or at scale with the Step Functions pipeline. [`infra/`](https://github.com/sidbhaumik/lakefreight/blob/main/infra/README.md) deploys it: buckets, keys, Snowflake roles and stages, the Lambda functions and the state machine.
-4. **Register** each table as Delta Lake or Iceberg once its chunks have landed.
-
-   ```bash
-   lakefreight register --format delta --table-root s3://my-egress/internal/SALES/PUBLIC/ORDERS
-   ```
+**Built with:** Python, Snowflake, AWS (S3, KMS, IAM, Lambda, Step Functions, Secrets Manager), Terraform/OpenTofu, Delta Lake (delta-rs), Apache Iceberg (pyiceberg), DuckDB, pytest, GitHub Actions, and PyPI trusted publishing.
 
 ## Try it in two minutes
 
-No Snowflake or AWS account needed. Clone the repo for the sample data; this generates extract SQL for five sample tables from a fictional travel company:
+No Snowflake or AWS account needed. This generates the extract SQL for five sample tables from a fictional travel company:
 
 ```bash
 git clone https://github.com/sidbhaumik/lakefreight.git
@@ -111,8 +76,6 @@ cd lakefreight && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/lakefreight plan --metadata examples/metadata_sample.csv --profiles examples/profiles_sample.csv --out generated
 ```
 
-Output:
-
 ```
 5 tables -> 17 work items in generated/
   status: NEEDS_PROFILE 1, READY 16
@@ -121,13 +84,7 @@ Output:
   note: TRAVEL.LEGACY.MISC_NOTES: table PII/RESTRICTED flag missing; treated as sensitive
 ```
 
-Open `generated/RESTRICTED/TRAVEL.BOOKINGS.RESERVATION/0002_202203_202204.sql` to see an unload with the xref join and its reconciliation queries.
-
-To register a table's unloaded files as Delta Lake (Iceberg works the same way with `--format iceberg`, a catalog and a table name):
-
-```bash
-.venv/bin/lakefreight register --format delta --table-root s3://my-egress/internal/TRAVEL/BOOKINGS/RESERVATION
-```
+The notes are the tool doing its job. A table with no sensitivity flag went to a protected zone, and a chunk column the tool can't confirm will prune is flagged for review. Open `generated/RESTRICTED/TRAVEL.BOOKINGS.RESERVATION/0002_202203_202204.sql` to see an unload with its detokenizing join and reconciliation queries.
 
 Run the tests:
 
@@ -135,47 +92,87 @@ Run the tests:
 .venv/bin/python -m pytest -q
 ```
 
+## Using it on your own Snowflake account
+
+Install the extras you need: `snowflake` to read metadata, and `delta` or `iceberg` to register tables.
+
+```bash
+pip install "lakefreight[snowflake,delta]"
+```
+
+Write a settings file to edit:
+
+```bash
+lakefreight config --write
+```
+
+Discover your tables, using a connection from `~/.snowflake/connections.toml`. Add `--sql-only` to get the query and run it yourself instead:
+
+```bash
+lakefreight discover --database SALES --database HR --out metadata.csv
+```
+
+Plan the extract:
+
+```bash
+lakefreight plan --metadata metadata.csv --out generated
+```
+
+Unload with the generated SQL, or at scale with the Step Functions pipeline that [`infra/`](https://github.com/sidbhaumik/lakefreight/blob/main/infra/README.md) deploys. Then register each table once its chunks have landed:
+
+```bash
+lakefreight register --format delta --table-root s3://my-egress/internal/SALES/PUBLIC/ORDERS
+```
+
+The [migration guide](https://github.com/sidbhaumik/lakefreight/blob/main/docs/migration-guide.md) walks through a full migration, step by step.
+
+## Scope and status
+
+| | Supported | Not yet |
+|---|---|---|
+| **Source** | Snowflake | Other warehouses |
+| **Storage** | Amazon S3 | Google Cloud Storage, Azure Data Lake Storage |
+| **Table formats** | Delta Lake and Apache Iceberg, over the same Parquet files | |
+| **Verified readers** | Databricks SQL (Delta), delta-rs, pyiceberg, DuckDB | Iceberg in Databricks; Snowflake, Redshift and BigQuery reads |
+| **Orchestration** | AWS Step Functions, deployed with Terraform or OpenTofu | |
+
+Version 0.9 covers the Snowflake-to-S3 path end to end, and every stage has run on live services except cross-account replication. It has not yet run a production-scale migration. Known limits:
+
+- Snowflake's Parquet unload keeps timestamps only to the millisecond. lakefreight detects the loss and fails the chunk, but cannot avoid it.
+- Rows that change after a table's snapshot need a delta pass, which is not built yet. Neither are cross-account replication tracking or egress purge.
+
+The full list is in [known gaps](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#known-gaps).
+
 ## Documentation
 
 | Document | Read it when |
 |---|---|
-| [Migration guide](https://github.com/sidbhaumik/lakefreight/blob/main/docs/migration-guide.md) | You have a migration like this to run and want the method, step by step |
+| [Migration guide](https://github.com/sidbhaumik/lakefreight/blob/main/docs/migration-guide.md) | You have a migration to run and want the method, step by step |
 | [Design decisions](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md) | You want to know why it is built this way, and what was rejected |
-| [Live validation](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md) | You want to see what was proven on a real Snowflake account, and what that run found |
+| [Live validation](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md) | You want to see what was proven on real accounts, and what each run found |
+| [Infrastructure](https://github.com/sidbhaumik/lakefreight/blob/main/infra/README.md) | You want to deploy the pipeline with Terraform |
+| [Changelog](https://github.com/sidbhaumik/lakefreight/blob/main/CHANGELOG.md) | You want to see what changed in each release |
 
-## Claude skill
-
-The repo includes a [Claude Code skill](https://github.com/sidbhaumik/lakefreight/blob/main/.claude/skills/generate-extract-sql/SKILL.md) that drives the generator. Open the repo in Claude Code and ask, for example, "generate extract SQL for the tables in my_metadata.csv". Claude normalizes the file, runs the generator, and reports which tables need a decision.
+The repo also includes a [Claude Code skill](https://github.com/sidbhaumik/lakefreight/blob/main/.claude/skills/generate-extract-sql/SKILL.md). Open the repo in Claude Code and ask it to "generate extract SQL for the tables in my_metadata.csv". Claude cleans up the file, runs the generator, and reports which tables need a decision.
 
 ## Repository layout
 
 | Path | Purpose |
 |---|---|
-| `src/lakefreight/cli.py` | The `lakefreight` command |
-| `src/lakefreight/discover.py` | `lakefreight discover`: the metadata CSV from Snowflake's metadata and classification |
-| `src/lakefreight/generate.py` | `lakefreight plan`: metadata CSV in, SQL files out |
-| `src/lakefreight/chunk_planner.py` | Packs date or integer-key ranges into chunks with gap-free predicates |
-| `src/lakefreight/renderer.py` | Renders the unload, source-count and unmatched-token SQL |
-| `src/lakefreight/templates/copy_unload.sql.j2` | The `COPY INTO` template |
-| `src/lakefreight/reconcile.py` | Pass/fail rules, manifest and schema sidecar |
-| `src/lakefreight/planning.py` | Creates work items in Snowflake from the control tables |
-| `src/lakefreight/handlers.py` | Lambda handlers: list, submit, poll, reconcile, summarize |
-| `src/lakefreight/register.py` | `lakefreight register`: Delta Lake or Iceberg metadata over the unloaded files |
-| `infra/terraform/` | Terraform/OpenTofu for the AWS and Snowflake side; see `infra/README.md` |
-| `infra/build_lambda.sh` | Builds the Lambda package |
-| `stepfunctions/extract_lane.asl.json` | State machine, one execution per lane |
-| `sql/ddl/` | Control tables and the script that seeds them from metadata |
-| `src/lakefreight/defaults.toml` | Default settings: thresholds, zones, lanes, xref names. `lakefreight config --write` makes an editable copy |
+| `src/lakefreight/` | The package: `discover`, `generate` (plan), `chunk_planner`, `renderer`, `reconcile`, `planning`, `handlers` (Lambda) and `register` |
+| `infra/terraform/` | Terraform/OpenTofu for AWS and Snowflake, with its own tests |
+| `stepfunctions/` | The state machine, one execution per lane |
+| `sql/ddl/` | Control tables, and the script that seeds them from metadata |
 | `examples/` | Sample metadata and table profiles |
-| `.claude/skills/` | The Claude skill |
-
-## Not included
-
-- Replication tracking, egress purge, and the delta pass for rows that change after a table's snapshot.
+| `tests/` | The test suite, with fake Snowflake connections that behave like the real connector |
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/sidbhaumik/lakefreight/blob/main/CONTRIBUTING.md). Changes are listed in [CHANGELOG.md](https://github.com/sidbhaumik/lakefreight/blob/main/CHANGELOG.md).
+See [CONTRIBUTING.md](https://github.com/sidbhaumik/lakefreight/blob/main/CONTRIBUTING.md). To report a vulnerability, see [SECURITY.md](https://github.com/sidbhaumik/lakefreight/blob/main/SECURITY.md).
+
+## Author
+
+Built by **Siddhartha Bhaumik** ([@sidbhaumik](https://github.com/sidbhaumik))
 
 ## License
 
