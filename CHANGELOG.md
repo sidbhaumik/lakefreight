@@ -4,6 +4,20 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-27
+
+The first stable release. The command line, settings, control tables, output layout, chunk IDs, manifests and Terraform interface are now covered by Semantic Versioning: every 1.x release keeps a migration in progress working. [docs/compatibility.md](https://github.com/sidbhaumik/lakefreight/blob/main/docs/compatibility.md) lists what is stable and what is not.
+
+### Added
+
+- `docs/compatibility.md`: the stable interfaces, what may change in 1.x, the deprecation policy, and how to upgrade mid-migration.
+- Manifests and `_schema.json` files carry `format_version` (1). `lakefreight register` refuses a manifest with a newer format, and reads files without the field, from earlier versions, as version 1.
+
+### Changed
+
+- The package is marked Production/Stable.
+- The README leads with what has been proven on live services. Known gaps are grouped into scope, platform limits, future work, and what is built but not yet verified live.
+
 ## [0.9.0] - 2026-11-27
 
 Tables still being written extract as of one snapshot.
@@ -178,7 +192,8 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.6.0...v0.7.0

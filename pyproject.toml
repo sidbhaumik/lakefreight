@@ -1,6 +1,6 @@
 [project]
 name = "lakefreight"
-version = "0.9.0"
+version = "1.0.0"
 description = "Bulk-move warehouse tables into open lakehouse files on cloud storage, for any engine to read"
 readme = "README.md"
 license = "MIT"
@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 dependencies = ["jinja2>=3.1"]
 keywords = ["snowflake", "s3", "parquet", "data-migration", "lakehouse", "databricks", "redshift", "bigquery", "delta-lake", "iceberg"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
