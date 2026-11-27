@@ -4,6 +4,25 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-27
+
+Tables still being written extract as of one snapshot.
+
+### Added
+
+- Tables still being written are read as of one snapshot through Snowflake time travel. For tables with `STILL_WRITTEN` set (or all tables, with `snapshot = "all"`), the planner takes one UTC snapshot per run. The profile, every unload and every reconciliation query read `AT(TIMESTAMP => snapshot)`, so all chunks come from the same moment, related tables stay consistent, and reconciliation passes however much the live table changes.
+- The planner checks each pinned table's time-travel retention against `snapshot_window_hours` (default 12) and refuses, before planning anything, a table that could age out mid-extract.
+- `lakefreight plan --snapshot '<UTC timestamp>'` pins the generated SQL.
+- Terraform variables `snapshot` and `snapshot_window_hours`.
+
+### Changed
+
+- `SNAPSHOT_TS` on a work item is now the snapshot every query for it reads at, set by the planner, or NULL when the table is read live. `submit` no longer overwrites it with the submit time.
+
+### Upgrading
+
+- `STILL_WRITTEN` was stored but unused before. Tables that already have it set are now read as of a snapshot, and planning refuses any whose time-travel retention is shorter than `snapshot_window_hours`. Work items planned by earlier versions keep the submit time in `SNAPSHOT_TS`; re-plan them, or clear it, before running them with this version.
+
 ## [0.8.0] - 2026-11-27
 
 Reconciliation checks values, not just row counts.
@@ -159,7 +178,8 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.5.1...v0.6.0

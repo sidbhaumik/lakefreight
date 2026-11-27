@@ -1,6 +1,6 @@
 [project]
 name = "lakefreight"
-version = "0.8.0"
+version = "0.9.0"
 description = "Bulk-move warehouse tables into open lakehouse files on cloud storage, for any engine to read"
 readme = "README.md"
 license = "MIT"
