@@ -4,6 +4,18 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-27
+
+Registered tables can now be updated in place.
+
+### Added
+
+- `lakefreight register --update` brings a registered Delta or Iceberg table up to date in one commit: chunks with a newer run replace their old files, chunks that arrived later are added, and unchanged chunks are left alone. Nothing is written if the table already matches. It refuses a table another writer has changed, or whose newest runs change the schema. For Delta, earlier versions stay readable for time travel.
+
+### Changed
+
+- Documentation records an updated Delta table read in Databricks SQL: the current version, time travel to the original, `DESCRIBE HISTORY`, `DEEP CLONE` and file skipping. The migration guide explains `--update`, when it refuses, and why not to `VACUUM` a table you still update.
+
 ## [0.5.1] - 2026-11-26
 
 A security fix found in the first full live run on AWS.
@@ -112,7 +124,8 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/sidbhaumik/lakefreight/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.1...v0.4.2
