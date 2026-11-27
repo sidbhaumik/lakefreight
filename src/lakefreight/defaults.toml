@@ -6,6 +6,8 @@ full_threshold_bytes = 107374182400         # 100 GiB: at or below this, one COP
 target_chunk_bytes = 80530636800            # 75 GiB: target size of one chunk for larger tables
 max_file_size_bytes = 1073741824            # 1 GiB Parquet part files
 unmatched_token_threshold = 0               # restricted zone: max non-null tokens with no xref match per chunk
+# parquet_file_format = "MIGRATION.CONTROL.LAKEFREIGHT_PARQUET"  # reads unloaded files back; default: control_schema + .LAKEFREIGHT_PARQUET
+allow_timestamp_precision_loss = false      # true accepts timestamps cut to the millisecond (Parquet from Snowflake keeps no more)
 
 [xref]
 table = "SECURE.PUBLIC.TOKEN_XREF"          # CHANGE-ME: fully qualified name

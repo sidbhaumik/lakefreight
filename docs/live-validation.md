@@ -60,6 +60,23 @@ A 100-row token cross-reference sat in a separate database.
 - Reads from Spark or Databricks, Snowflake external tables, Redshift and BigQuery.
 - Snowflake's own sensitive data classification. Classification results take hours to reach `ACCOUNT_USAGE`, so this run used column-name rules.
 
+# Value reconciliation
+
+On 2026-11-27 the demo tables were recreated with two more: one holding every column type the renderer handles (17, from `BINARY` and `GEOGRAPHY` to `TIMESTAMP_TZ`), and one with timestamps before 1970 that have sub-millisecond digits. They were discovered, seeded and planned into 20 work items. The real `submit`, `poll` and `reconcile` handlers then ran against the Snowflake trial, unloading to internal stages and keeping manifests in memory.
+
+| Check | Result |
+|---|---|
+| Fingerprints | For every table and all 17 types, the source fingerprint equalled the one read back from the files, including detokenized passports and timestamps converted to UTC |
+| Default run | 17 of 20 chunks failed, each naming the timestamp columns and how many values had digits below a millisecond: every `LOAD_TS`, `LISTED_AT` and `EVENT_TS` value in the demo data. The 3 chunks with none reconciled |
+| Accepting the loss | With `allow_timestamp_precision_loss = true`, the 17 reconciled on the next run: all 20, 161,206 rows, with the fingerprint in every manifest |
+| A changed value | Changing one email in the source after the unload changed its fingerprint; so did swapping two names between rows |
+| A bad unload | An unload altered to write `UPPER(EMAIL)` kept the row count, failed with "values differ", and wrote no manifest |
+| Empty chunk | A chunk with no rows and no files compared as equal |
+
+**Found:** for timestamps before 1970, Snowflake's Parquet writer cuts toward zero on the epoch, so `1969-12-31 23:59:59.9995` became `1970-01-01 00:00:00.000`, a later instant, not an earlier one. The fingerprint models this, and design decision 14 records it.
+
+Every live run before this one reconciled chunks whose timestamps had lost their sub-millisecond digits. Row counts alone could not see it.
+
 # Chunking by integer key and by day
 
 On 2026-11-27 two tables were built in the Snowflake trial to exercise the planner on data the earlier runs did not cover:

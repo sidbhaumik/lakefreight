@@ -64,7 +64,7 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 ## 9. The manifest is the commit marker
 
-**Decision.** A manifest is written last, after row counts match. The receiver loads only prefixes that contain one. Each attempt writes to a new `run_id` prefix.
+**Decision.** A manifest is written last, after reconciliation passes: row counts and values (decision 16). The receiver loads only prefixes that contain one. Each attempt writes to a new `run_id` prefix.
 
 **Rejected.** Copying files to a separate "ready" location after validation.
 
@@ -110,6 +110,8 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 **Why.** Snowflake refuses to unload `TIMESTAMP_LTZ` and `TIMESTAMP_TZ` to Parquet, and Delta Lake has no `TIME` type. A live run also showed that Snowflake writes every Parquet timestamp in milliseconds, marked as UTC, whatever the column's precision or cast; no unload setting changes it. Digits finer than a millisecond are therefore lost. A lossless alternative, unloading timestamps as text or as epoch microseconds, would make every reader convert them back, so it is not the default.
 
+The loss is not silent. Reconciliation counts the values in each timestamp column that have digits finer than a millisecond and fails the chunk, naming the columns, unless `allow_timestamp_precision_loss` is set. The writer cuts toward zero on the epoch, so a value before 1970 moves forward, for example `1969-12-31 23:59:59.9995` becomes `1970-01-01 00:00:00.000`.
+
 ## 15. Infrastructure is Terraform, covering both AWS and Snowflake
 
 **Decision.** One Terraform/OpenTofu configuration creates the AWS side (buckets, keys, roles, Lambda functions, state machine, optional replication) and the Snowflake side (warehouses, roles, storage integrations, stages, grants, service user).
@@ -118,6 +120,14 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 
 **Why.** The two sides reference each other: Snowflake's storage integration needs the AWS role's ARN, and the role's trust policy needs the integration's Snowflake identity. One tool resolves that in a single plan. Terraform is also what most data platform teams already run, and it works with either Terraform or OpenTofu.
 
+## 16. Reconciliation compares values, not just counts
+
+**Decision.** After each unload, one query fingerprints the chunk's values in the source with `HASH_AGG`, using the same expressions and joins as the unload. A second query computes the same fingerprint over the files that attempt wrote, read back through the zone's stage. The chunk passes only if the row counts and the fingerprints are equal, and no timestamp loses digits unless that was accepted. The fingerprint goes into the manifest.
+
+**Rejected.** Row counts alone; sampling rows; comparing outside Snowflake.
+
+**Why.** A count catches dropped and duplicated rows, but not changed values: a wrong cast, a timezone shift, a broken detokenizing join, or timestamps cut to the millisecond all keep the count and pass. `HASH_AGG` is order-independent and covers every row and column, and running both sides in Snowflake means one engine reads both, with no rows leaving it. Reading the files back through the zone's own stage uses the same role and key that wrote them. The extra cost is one scan of the chunk's source and one read of its files.
+
 ## Known gaps
 
 - Large tables whose clustering key leads with neither a date nor an integer, such as a text code, run as one `COPY`.
@@ -125,4 +135,5 @@ Each entry gives the decision, the alternative that was rejected, and the reason
 - `infra/terraform` has been applied to a live AWS account and run end to end, with Snowflake writing into S3 through the zone roles. Cross-account replication is still untested.
 - Snowflake's Parquet unload keeps timestamps only to the millisecond. Columns that need finer precision have no lossless path yet.
 - Registered Delta tables have been read back in Databricks SQL, and Delta and Iceberg tables with delta-rs, pyiceberg and DuckDB, all from a live Snowflake unload. Iceberg in Databricks, and either format in Snowflake, Redshift or BigQuery, is untested.
+- Like the row count, the value check reads the source after the unload, so a source table still being written can fail it. Extract from a zero-copy clone, as the migration guide says.
 - `register --update` writes the Delta log without a lock, so it relies on one registration per table at a time. Updated Delta tables have been read in Databricks SQL and with delta-rs.

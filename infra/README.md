@@ -64,6 +64,7 @@ Edit `terraform.tfvars`:
 - `service_user_public_key`: the body of `lakefreight_key.pub`, on one line, without the `BEGIN` and `END` lines
 - `xref_table`: only if you detokenize restricted columns. Keep it outside the source databases; the plan fails if it isn't.
 - `replication`: only if you replicate to a receiving account (step 9)
+- `allow_timestamp_precision_loss`: leave `false` to fail chunks whose timestamps would lose digits below a millisecond; set `true` if milliseconds are enough
 
 `variables.tf` lists every option, including warehouse sizes and concurrency per lane.
 

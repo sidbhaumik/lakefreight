@@ -162,8 +162,28 @@ def reconcile(event, _context=None):
             cur.execute(unmatched_sql)
             unmatched = int(cur.fetchone()[0])
 
+        # Values, not just counts: fingerprint the source as unloaded and the files
+        # as written, and count timestamps that lose digits below a millisecond.
+        cur.execute(renderer.source_values_sql(table, item["PREDICATE"], settings))
+        source_values = cur.fetchone()
+        source_hash = int(source_values[0] or 0)
+        sub_ms = {
+            col: int(n or 0)
+            for col, n in zip(renderer.timestamp_columns(table), source_values[1:], strict=True)
+        }
+        cur.execute(renderer.staged_values_sql(table, item["CHUNK_ID"], event["run_id"], settings))
+        staged_rows, staged_hash = cur.fetchone()
+
         ok, reason = rules.evaluate(
-            rows_unloaded, source_rows, unmatched, settings.unmatched_token_threshold
+            rows_unloaded,
+            source_rows,
+            unmatched,
+            settings.unmatched_token_threshold,
+            sub_millisecond=sub_ms,
+            allow_precision_loss=settings.allow_timestamp_precision_loss,
+            staged_rows=int(staged_rows or 0),
+            source_hash=source_hash,
+            staged_hash=int(staged_hash or 0),
         )
         counts = dict(
             ROWS_UNLOADED=rows_unloaded,
@@ -195,6 +215,7 @@ def reconcile(event, _context=None):
             files,
             rows_unloaded,
             chunks_in_table=chunks_in_table,
+            value_hash=source_hash,
         )
         s3 = _s3()
         # Encrypt lakefreight's own files with the zone's key, like the data files.

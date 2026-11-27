@@ -175,7 +175,9 @@ Deploy the pipeline with [`infra/`](../infra/README.md), create work items (`pyt
 | Small | Everything under the threshold | Thousands of tables, little volume; finishes in days |
 | Restricted | Restricted zone | Own role, warehouse and controls |
 
-Each work item goes through: submit the `COPY`, poll until it finishes, reconcile, write the manifest. A rerun picks up pending and failed items only.
+Each work item goes through: submit the `COPY`, poll until it finishes, reconcile, write the manifest. Reconciling compares row counts and a fingerprint of every value, read back from the files just written. A rerun picks up pending and failed items only.
+
+By default a chunk whose timestamps have digits finer than a millisecond fails, because Parquet from Snowflake cannot keep them. The failure names the columns and counts the values. If milliseconds are enough, set `allow_timestamp_precision_loss = true` (the Terraform variable of the same name) and run the lane again.
 
 Track daily unloaded volume against the design rate with the `EXTRACT_PROGRESS` view.
 
@@ -262,6 +264,8 @@ To register the files in place as an external table instead, the bucket must be 
 | Level | Check |
 |---|---|
 | Work item | Rows unloaded equal the source count for the same predicate |
+| Values | A `HASH_AGG` fingerprint of the source values, as unloaded, equals the same fingerprint read back from the files; the files hold as many rows as the `COPY` reported |
+| Timestamps | No value has digits finer than a millisecond, or `allow_timestamp_precision_loss` is set |
 | Chunked table | Chunk counts sum to the table count, NULL chunk included |
 | Tokenized chunk | Unmatched tokens within threshold |
 | Project | One report row per table: source rows, extracted rows, files, bytes, status |
@@ -281,6 +285,7 @@ Then purge the egress buckets, drop any clones, and hand over the snapshot times
 | Treating a missing flag as non-sensitive | Unclassified data lands in the open zone | Failing closed |
 | Starting small tables first | The largest tables finish after the deadline | Starting the largest tables on day one |
 | Unloading time-zone-aware timestamps as they are | The unload fails or readers disagree | Casting to UTC `TIMESTAMP_NTZ` |
-| Expecting sub-millisecond timestamps to survive | Snowflake writes Parquet timestamps in milliseconds; finer digits are lost | Checking whether any column needs more, before the pilot |
+| Expecting sub-millisecond timestamps to survive | Snowflake writes Parquet timestamps in milliseconds; finer digits are lost | Reading the reconciliation failures from the pilot: they name each column that would lose digits |
+| Reconciling on row counts only | A wrong cast or a broken join keeps the count and passes | Comparing a fingerprint of the values on both sides |
 | Building a table from every file in the folder | Files from failed attempts appear as duplicate rows | Registering only files named in a manifest |
 | Releasing files before reconciling | The receiver loads partial data | Writing the manifest last |

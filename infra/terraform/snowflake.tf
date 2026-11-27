@@ -23,6 +23,27 @@ resource "snowflake_schema" "control" {
   name     = var.control_schema
 }
 
+# Reads unloaded files back to check their values against the source. Binary
+# columns must stay binary, not be decoded as text.
+resource "snowflake_file_format_parquet" "reconcile" {
+  database       = snowflake_database.control.name
+  schema         = snowflake_schema.control.name
+  name           = "LAKEFREIGHT_PARQUET"
+  binary_as_text = "false"
+  comment        = "lakefreight: read unloaded Parquet back for reconciliation"
+}
+
+resource "snowflake_grant_privileges_to_account_role" "file_format" {
+  for_each = local.zones
+
+  account_role_name = snowflake_account_role.zone[each.key].name
+  privileges        = ["USAGE"]
+  on_schema_object {
+    object_type = "FILE FORMAT"
+    object_name = snowflake_file_format_parquet.reconcile.fully_qualified_name
+  }
+}
+
 # --- One role, storage integration and stage per zone ---------------------------
 
 resource "snowflake_account_role" "zone" {

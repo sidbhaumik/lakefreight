@@ -6,6 +6,13 @@
 -- With infra/terraform, run this after `terraform apply`, so the extract roles'
 -- future grants apply to these tables. Without it, create the schema first.
 
+-- Reads unloaded files back, so reconciliation can compare their values with the
+-- source. infra/terraform creates it and grants USAGE to the zone roles; without
+-- it, grant USAGE on it to each role that unloads.
+CREATE FILE FORMAT IF NOT EXISTS LAKEFREIGHT_PARQUET
+    TYPE = PARQUET
+    BINARY_AS_TEXT = FALSE;
+
 -- One row per source table.
 CREATE TABLE IF NOT EXISTS EXTRACT_CONFIG (
     DATABASE_NAME        STRING        NOT NULL,

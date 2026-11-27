@@ -15,7 +15,7 @@ Only the latest release gets security fixes.
 lakefreight moves sensitive data, so these are in scope:
 
 - A table or column reaching a less protected zone than its flags require, for example personal data written to the `INTERNAL` zone, or clear restricted values written anywhere but `RESTRICTED`
-- Rows silently dropped or duplicated without reconciliation catching it
+- Rows silently dropped, duplicated or changed without reconciliation catching it
 - Files from a failed or partial attempt being picked up by `lakefreight register`
 - An IAM, KMS or Snowflake grant in `infra/terraform` that is broader than documented
 - Credentials or keys reaching logs, Terraform state, manifests or generated SQL

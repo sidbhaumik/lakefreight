@@ -12,15 +12,40 @@ def evaluate(
     source_rows: int,
     unmatched_tokens: int | None,
     unmatched_threshold: int,
+    *,
+    sub_millisecond: dict[str, int] | None = None,
+    allow_precision_loss: bool = False,
+    staged_rows: int | None = None,
+    source_hash: int | None = None,
+    staged_hash: int | None = None,
 ) -> tuple[bool, str | None]:
-    """A work item passes only if no rows were dropped or duplicated and,
-    for RESTRICTED, unmatched tokens are within the threshold."""
+    """A work item passes only if no rows were dropped or duplicated; for
+    RESTRICTED, unmatched tokens are within the threshold; no timestamp loses
+    digits unless that was accepted; and the values read back from the files
+    match the source, by fingerprint."""
     if rows_unloaded != source_rows:
         return False, f"row count mismatch: unloaded {rows_unloaded}, source {source_rows}"
     if unmatched_tokens is not None and unmatched_tokens > unmatched_threshold:
         return False, (
             f"{unmatched_tokens} rows have a token with no xref match "
             f"(threshold {unmatched_threshold})"
+        )
+    lossy = {col: n for col, n in (sub_millisecond or {}).items() if n}
+    if lossy and not allow_precision_loss:
+        detail = ", ".join(f"{col} ({n} values)" for col, n in sorted(lossy.items()))
+        return False, (
+            f"timestamps finer than a millisecond would be truncated: {detail}. Parquet "
+            "from Snowflake keeps milliseconds only; set allow_timestamp_precision_loss "
+            "to accept this"
+        )
+    if staged_rows is not None and staged_rows != rows_unloaded:
+        return False, (
+            f"the unloaded files hold {staged_rows} rows, the COPY reported {rows_unloaded}"
+        )
+    if source_hash is not None and staged_hash is not None and source_hash != staged_hash:
+        return False, (
+            "values differ between the source and the unloaded files "
+            f"(fingerprint {source_hash} vs {staged_hash})"
         )
     return True, None
 
@@ -35,6 +60,7 @@ def build_manifest(
     rows: int,
     chunks_in_table: int | None = None,
     written_at: str | None = None,
+    value_hash: int | None = None,
 ) -> dict:
     """`files` entries are {"name", "size", "rows"}; names are relative to the
     manifest's own folder. `chunks_in_table` lets a reader check completeness."""
@@ -52,6 +78,8 @@ def build_manifest(
         "bytes": sum(f["size"] for f in files),
         "files": files,
         "chunks_in_table": chunks_in_table,
+        # Snowflake HASH_AGG of the chunk's values, as unloaded; equal on both sides.
+        "value_hash": value_hash,
         "written_at": written_at or datetime.now(UTC).isoformat(timespec="seconds"),
     }
 

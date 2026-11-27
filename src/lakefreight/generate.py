@@ -225,9 +225,29 @@ def _statements(meta: TableMeta, chunk, run_id: str, settings: Settings) -> str:
         "-- 2. Source row count: must equal the rows unloaded",
         renderer.source_count_sql(spec, chunk.predicate) + ";",
     ]
+    step = 3
     unmatched = renderer.unmatched_sql(spec, chunk.predicate, settings)
     if unmatched:
-        parts += ["-- 3. Tokens with no xref match: must be within the threshold", unmatched + ";"]
+        parts += [
+            f"-- {step}. Tokens with no xref match: must be within the threshold",
+            unmatched + ";",
+        ]
+        step += 1
+    checks = renderer.timestamp_columns(spec)
+    names = ", ".join(f"SUB_MS_{n + 1} ({col})" for n, col in enumerate(checks))
+    note = (
+        f" {names} count values finer than a millisecond, which Parquet from Snowflake "
+        "cannot keep: they must be 0 unless you accept the loss."
+        if checks
+        else ""
+    )
+    parts += [
+        f"-- {step}. Fingerprint of the values as unloaded.{note}",
+        renderer.source_values_sql(spec, chunk.predicate, settings) + ";",
+        f"-- {step + 1}. The same fingerprint, read back from the unloaded files. ROW_COUNT must "
+        f"equal the rows unloaded, and VALUE_HASH the VALUE_HASH of step {step}.",
+        renderer.staged_values_sql(spec, chunk.chunk_id, run_id, settings) + ";",
+    ]
     return "\n\n".join(parts) + "\n"
 
 

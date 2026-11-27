@@ -53,6 +53,10 @@ class Settings:
     xref_clear_column: str
     zones: dict[str, Zone]
     lanes: dict[str, Lane]
+    # Named Parquet file format used to read unloaded files back for reconciliation.
+    parquet_file_format: str = ""
+    # Accept timestamps losing digits finer than a millisecond (Snowflake's Parquet limit).
+    allow_timestamp_precision_loss: bool = False
 
 
 def config_source(path: str | Path | None = None) -> Path | None:
@@ -95,4 +99,8 @@ def load_settings(path: str | Path | None = None) -> Settings:
         xref_clear_column=xref["clear_column"],
         zones={k: Zone(**v) for k, v in raw["zones"].items()},
         lanes={k: Lane(**v) for k, v in raw["lanes"].items()},
+        parquet_file_format=ex.get(
+            "parquet_file_format", f"{ex['control_schema']}.LAKEFREIGHT_PARQUET"
+        ),
+        allow_timestamp_precision_loss=bool(ex.get("allow_timestamp_precision_loss", False)),
     )

@@ -99,7 +99,7 @@ variable "full_threshold_bytes" {
 }
 
 variable "target_chunk_bytes" {
-  description = "Target size of one date chunk for larger tables."
+  description = "Target size of one chunk for larger tables."
   type        = number
   default     = 80530636800
 }
@@ -108,6 +108,12 @@ variable "unmatched_token_threshold" {
   description = "Most rows per chunk allowed to have a token with no cross-reference match."
   type        = number
   default     = 0
+}
+
+variable "allow_timestamp_precision_loss" {
+  description = "Accept timestamps losing digits finer than a millisecond, which Parquet from Snowflake cannot keep. When false, such chunks fail reconciliation."
+  type        = bool
+  default     = false
 }
 
 # --- AWS -----------------------------------------------------------------------

@@ -109,3 +109,78 @@ def test_timestamps_leave_as_microseconds_and_time_as_text():
     assert 't."LOADED"::TIMESTAMP_NTZ(6) AS "LOADED"' in sql
     assert """CONVERT_TIMEZONE('UTC', t."SEEN")::TIMESTAMP_NTZ(6) AS "SEEN\"""" in sql
     assert """TO_VARCHAR(t."OPENS", 'HH24:MI:SS.FF6') AS "OPENS\"""" in sql
+
+
+# --- Value reconciliation ------------------------------------------------------
+
+
+def test_source_fingerprint_matches_the_unload_and_counts_sub_millisecond_values():
+    cols = (
+        ColumnSpec("ID", "NUMBER(38,0)"),
+        ColumnSpec("PASSPORT_NO", "VARCHAR", use_xref=True),
+        ColumnSpec("SCORE", "DOUBLE"),
+        ColumnSpec("CREATED_AT", "TIMESTAMP_TZ(9)"),
+        ColumnSpec("OPENS", "TIME(9)"),
+        ColumnSpec("LOADED_AT", "TIMESTAMP_NTZ(9)"),
+    )
+    sql = renderer.source_values_sql(table("RESTRICTED", cols), 't."ID" < 10', settings)
+    assert '(t."ID")::NUMBER(38,0)' in sql
+    assert '(x1."CLEAR_VALUE")::VARCHAR' in sql  # detokenized values are compared too
+    assert '(t."SCORE")::FLOAT' in sql
+    # Timestamps are cut to the millisecond toward zero on the epoch, like the writer.
+    assert (
+        "TO_TIMESTAMP_NTZ(TRUNC(DATE_PART(EPOCH_NANOSECOND, (CONVERT_TIMEZONE('UTC', "
+        't."CREATED_AT")::TIMESTAMP_NTZ(6))::TIMESTAMP_NTZ(9)) / 1000000), 3)'
+    ) in sql
+    assert """(TO_VARCHAR(t."OPENS", 'HH24:MI:SS.FF6'))::VARCHAR""" in sql
+    assert "LEFT JOIN SECURE.PUBLIC.TOKEN_XREF x1" in sql and sql.endswith('WHERE t."ID" < 10')
+    assert "AS SUB_MS_1" in sql and "AS SUB_MS_2" in sql and "SUB_MS_3" not in sql
+    assert renderer.timestamp_columns(table("RESTRICTED", cols)) == ["CREATED_AT", "LOADED_AT"]
+
+
+def test_staged_fingerprint_reads_one_attempt_with_the_same_expressions():
+    cols = (ColumnSpec("ID", "NUMBER(38,0)"), ColumnSpec("Owner's Name", "VARCHAR"))
+    sql = renderer.staged_values_sql(table(columns=cols), "0001_k0_k10", "abc", settings)
+    assert "SELECT COUNT(*) AS ROW_COUNT, HASH_AGG(($1['ID'])::NUMBER(38,0)" in sql
+    assert "($1['Owner''s Name'])::VARCHAR" in sql
+    assert (
+        "@MIGRATION.CONTROL.EGRESS_INTERNAL_STAGE/SALES/PUBLIC/ORDERS/chunk=0001_k0_k10/run_id=abc/"
+        in sql
+    )
+    assert "FILE_FORMAT => 'MIGRATION.CONTROL.LAKEFREIGHT_PARQUET'" in sql
+
+
+def test_unload_select_is_unchanged_by_the_split():
+    # select_expr keeps plain columns unaliased and casts aliased, as before.
+    col = ColumnSpec("ID", "NUMBER(38,0)")
+    assert renderer.select_expr(col, None, "CLEAR_VALUE") == 't."ID"'
+    assert renderer.select_expr(col, "x1", "CLEAR_VALUE") == 'x1."CLEAR_VALUE" AS "ID"'
+
+
+def test_reconcile_rules_for_values():
+    ok = dict(staged_rows=5, source_hash=9, staged_hash=9)
+    assert evaluate(5, 5, None, 0, **ok) == (True, None)
+    assert (
+        "values differ" in evaluate(5, 5, None, 0, staged_rows=5, source_hash=9, staged_hash=8)[1]
+    )
+    lossy = evaluate(5, 5, None, 0, sub_millisecond={"A": 0, "B": 3}, **ok)
+    assert not lossy[0] and "B (3 values)" in lossy[1] and "A (" not in lossy[1]
+    assert evaluate(5, 5, None, 0, sub_millisecond={"B": 3}, allow_precision_loss=True, **ok)[0]
+    # The row count check still comes first.
+    assert "row count mismatch" in evaluate(5, 4, None, 0, **ok)[1]
+
+
+def test_parquet_file_format_setting(tmp_path):
+    from lakefreight.config import default_config_text
+
+    text = default_config_text().replace(
+        "allow_timestamp_precision_loss = false",
+        'allow_timestamp_precision_loss = true\nparquet_file_format = "OPS.FMT.PQ"',
+        1,
+    )
+    path = tmp_path / "lakefreight.toml"
+    path.write_text(text)
+    custom = load_settings(path)
+    assert custom.parquet_file_format == "OPS.FMT.PQ" and custom.allow_timestamp_precision_loss
+    assert settings.parquet_file_format == "MIGRATION.CONTROL.LAKEFREIGHT_PARQUET"
+    assert not settings.allow_timestamp_precision_loss
