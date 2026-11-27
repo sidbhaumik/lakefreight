@@ -4,6 +4,25 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-27
+
+Reconciliation checks values, not just row counts.
+
+### Added
+
+- Reconciliation compares values, not just row counts. After each unload, a `HASH_AGG` fingerprint of the chunk's source values, computed with the same expressions and joins as the unload, must equal the same fingerprint read back from the files that attempt wrote, through the zone's stage. The files must also hold as many rows as the `COPY` reported. The fingerprint is recorded in the manifest as `value_hash`.
+- Reconciliation counts timestamp values with digits finer than a millisecond, which Parquet from Snowflake cannot keep, and fails the chunk, naming each column. Set `allow_timestamp_precision_loss = true` (or the Terraform variable) to accept the loss.
+- A `LAKEFREIGHT_PARQUET` file format in the control schema reads the files back; Terraform creates it and grants `USAGE` to the zone roles, and `01_control_tables.sql` creates it for setups without Terraform. The `parquet_file_format` setting names another.
+- Generated SQL from `lakefreight plan` includes both fingerprint queries.
+
+### Changed
+
+- **Chunks that lose sub-millisecond timestamp digits now fail by default.** Earlier versions reconciled them silently.
+
+### Upgrading
+
+- Run `terraform apply` to add the file format and its grants. Without Terraform, run `CREATE FILE FORMAT LAKEFREIGHT_PARQUET TYPE = PARQUET BINARY_AS_TEXT = FALSE` in the control schema and grant `USAGE` on it to each zone role.
+
 ## [0.7.0] - 2026-11-27
 
 Chunking for large tables with no date column, and for months too big for one chunk.
@@ -140,7 +159,8 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/sidbhaumik/lakefreight/compare/v0.5.0...v0.5.1
