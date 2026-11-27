@@ -33,7 +33,7 @@ Each stage of the pipeline has been run against a real Snowflake account, a real
 
 ### What live testing caught
 
-The offline tests passed in every case below. Running against real services found the problem, and each is now fixed and covered by a test.
+The offline tests passed in every case below. Running against real services found the problem, and each is now fixed and covered by a test. The write-up [Row counts are not proof](https://github.com/sidbhaumik/lakefreight/blob/main/docs/write-up.md) tells these stories in full.
 
 - **A security gap between sensitivity zones.** Snowflake turns on all of a user's granted roles as secondary roles by default, so a session opened for non-sensitive data could also read the personal-data stages. Fixed in Terraform and in every connection ([0.5.1](https://github.com/sidbhaumik/lakefreight/blob/main/CHANGELOG.md#051---2026-11-26)).
 - **Silent precision loss.** Snowflake's Parquet writer keeps only milliseconds, and moves pre-1970 timestamps *forward* in time. Row counts could not see this. Value fingerprints now catch it and fail the chunk by default.
@@ -148,6 +148,7 @@ Version 1.0 covers the Snowflake-to-S3 path end to end, and every stage has run 
 
 | Document | Read it when |
 |---|---|
+| [Row counts are not proof](https://github.com/sidbhaumik/lakefreight/blob/main/docs/write-up.md) | You want the story: six problems that only live testing found, and what each one taught |
 | [Migration guide](https://github.com/sidbhaumik/lakefreight/blob/main/docs/migration-guide.md) | You have a migration to run and want the method, step by step |
 | [Design decisions](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md) | You want to know why it is built this way, and what was rejected |
 | [Live validation](https://github.com/sidbhaumik/lakefreight/blob/main/docs/live-validation.md) | You want to see what was proven on real accounts, and what each run found |
