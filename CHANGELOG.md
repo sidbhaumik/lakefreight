@@ -4,6 +4,22 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-27
+
+Chunking for large tables with no date column, and for months too big for one chunk.
+
+### Added
+
+- Large tables with no date column are chunked by ranges of an integer key, profiled into up to 10,000 equal-width ranges and packed to the target size. Chunk IDs look like `0002_k1000000_k2000000`.
+- A month too big for one chunk is split by day, with chunk IDs like `0003_20240301_20240313`. Months that fit are packed exactly as before, so existing chunk IDs do not change.
+- `discover` records each table's clustering key (`table_clustering_key`). Seeding, and `lakefreight plan`, pick the column the key leads with as the chunk column when it is a date, timestamp or integer, so chunks prune without a manual review. Otherwise the name-based date guess still applies.
+
+### Changed
+
+- Profile queries count rows by day (or by key range) and return `BUCKET_START`. Profile files with the old `month_start` column still plan, but are never split below a month.
+- The planner refuses a chunk column that is not a date, timestamp or integer, instead of profiling it.
+- Re-run `lakefreight discover` before seeding: the seed script reads the new clustering-key column.
+
 ## [0.6.0] - 2026-11-27
 
 Registered tables can now be updated in place.
@@ -124,7 +140,8 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/sidbhaumik/lakefreight/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.4.2...v0.5.0
