@@ -4,6 +4,20 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-27
+
+Parallel updates: `register --update` can run on the same table from many writers at once.
+
+### Added
+
+- `lakefreight register --update` can run in parallel on the same table. Each Delta commit is created only if its version does not exist yet, with a conditional put on S3 (`If-None-Match: *`) and a hard link on local disk. A writer that loses re-reads the table and its manifests, plans again and retries, up to 10 times; if the winner already added its chunks, it commits nothing. Iceberg updates retry the same way on catalog conflicts.
+- The `delta` extra installs `boto3`, used for the conditional put on S3.
+
+### Changed
+
+- A new Iceberg table and its files are created in one commit, so no reader or concurrent update sees it empty.
+- An update reads the table before the manifests, so a slower writer can never swap a chunk back to an older run.
+
 ## [1.1.0] - 2026-11-27
 
 The delta pass: catch up with the rows that changed after the snapshot, until cut-over.
@@ -221,7 +235,8 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/sidbhaumik/lakefreight/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/sidbhaumik/lakefreight/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.8.0...v0.9.0

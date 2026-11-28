@@ -1,6 +1,6 @@
 [project]
 name = "lakefreight"
-version = "1.1.0"
+version = "1.2.0"
 description = "Bulk-move warehouse tables into open lakehouse files on cloud storage, for any engine to read"
 readme = "README.md"
 license = "MIT"
@@ -33,12 +33,13 @@ dev = [
     "ruff>=0.6",
     "pyarrow>=14",
     "deltalake>=1.0",
+    "boto3>=1.35.16",
     "pyiceberg[sql-sqlite]>=0.9",
     "duckdb>=1.0",
     "sqlglot>=25",
 ]
 # Register unloaded files as open table formats (lakefreight register).
-delta = ["pyarrow>=14", "deltalake>=1.0"]
+delta = ["pyarrow>=14", "deltalake>=1.0", "boto3>=1.35.16"]  # boto3: atomic commits on S3
 iceberg = ["pyarrow>=14", "pyiceberg>=0.9"]
 # Connect to Snowflake (lakefreight discover).
 snowflake = ["snowflake-connector-python>=3.12"]
