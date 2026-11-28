@@ -4,6 +4,35 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-27
+
+The delta pass: catch up with the rows that changed after the snapshot, until cut-over.
+
+### Added
+
+- `python -m lakefreight.planning --changes` creates a change set for each table whose bulk extract has reconciled: the rows that changed from its last snapshot to a new one, read through Snowflake change tracking. Each change set is a work item with `KIND = 'CHANGES'`, run by the same lanes and handlers as chunks. Repeat it until cut-over; each pass starts where the last ended.
+- Change sets carry the table's columns plus `LF_ACTION` (`INSERT` or `DELETE`) and `LF_IS_UPDATE`, under `<zone prefix>/_changes/`. Their manifests record `changes_from_ts`.
+- Change sets reconcile like chunks, by row count, fingerprint and unmatched tokens, and must also balance: the rows at the first snapshot, plus inserts, minus deletes, equal the rows at the second.
+- Before creating any change set, the planner checks every table's time-travel retention and that change tracking has covered the whole range, and refuses with the table and the fix if not. It skips, with a note, tables whose bulk extract hasn't finished, that were read live or from a clone, or that still have a change set running.
+- `lakefreight plan --snapshot ... --changes-since ...` generates a change set's SQL for every table in the metadata.
+- Registering a `_changes` folder gives a Delta or Iceberg change log, and `--update` adds each new pass.
+
+### Changed
+
+- The bulk chunk count in manifests (`chunks_in_table`) leaves out change sets.
+- `EXTRACT_PROGRESS` reports work items by kind.
+
+### Upgrading
+
+- Add two columns to the work-item table, then rerun `sql/ddl/01_control_tables.sql` to update the `EXTRACT_PROGRESS` view:
+
+  ```sql
+  ALTER TABLE EXTRACT_WORK_ITEM ADD COLUMN KIND STRING DEFAULT 'BULK';
+  ALTER TABLE EXTRACT_WORK_ITEM ADD COLUMN CHANGES_FROM_TS TIMESTAMP_NTZ;
+  ```
+
+- For a delta pass, change tracking must be on from before the bulk snapshot: `ALTER TABLE ... SET CHANGE_TRACKING = TRUE` on each table still being written. Tables extracted without it can't have a delta pass.
+
 ## [1.0.0] - 2026-11-27
 
 The first stable release. The command line, settings, control tables, output layout, chunk IDs, manifests and Terraform interface are now covered by Semantic Versioning: every 1.x release keeps a migration in progress working. [docs/compatibility.md](https://github.com/sidbhaumik/lakefreight/blob/main/docs/compatibility.md) lists what is stable and what is not.
@@ -192,7 +221,8 @@ First public release.
 - Claude Code skill for generating extract SQL.
 - Migration guide and design decision records.
 
-[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/sidbhaumik/lakefreight/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/sidbhaumik/lakefreight/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/sidbhaumik/lakefreight/compare/v0.7.0...v0.8.0
