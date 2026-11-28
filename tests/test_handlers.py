@@ -26,6 +26,8 @@ ITEM = {
 
 
 class FakeCursor:
+    balance = (100, 100, 0, 0)  # ROWS_FROM, ROWS_TO, INSERTS, DELETES
+
     def __init__(self, copy_rows, source_rows, values=None):
         self.copy_rows, self.source_rows = copy_rows, source_rows
         rows = sum(r[2] for r in copy_rows)
@@ -42,7 +44,9 @@ class FakeCursor:
             self.updates.append((sql, params))
         self.description = None
         source_hash, sub_ms, staged_rows, staged_hash = self.values
-        if "HASH_AGG" in sql and "FROM @" in sql:
+        if "ROWS_FROM" in sql:
+            row = self.balance
+        elif "HASH_AGG" in sql and "FROM @" in sql:
             row = (staged_rows, staged_hash)
         elif "HASH_AGG" in sql:
             row = (source_hash, sub_ms)
@@ -291,3 +295,65 @@ def test_submit_keeps_the_planned_snapshot(monkeypatch):
     handlers.submit({"work_item_id": "x"})
     assert "AT(TIMESTAMP => '2026-11-27 20:00:00 +00:00'::TIMESTAMP_TZ)" in executed[0]
     assert "SNAPSHOT_TS" not in updates
+
+
+def _keep_cursor(monkeypatch):
+    holder = {}
+    original = FakeCursor.__init__
+
+    def keep(self, *a, **kw):
+        original(self, *a, **kw)
+        holder["cur"] = self
+
+    monkeypatch.setattr(FakeCursor, "__init__", keep)
+    return holder
+
+
+CHANGE_ITEM = {
+    "CHUNK_ID": "changes_20260131T120000_20260201T090000",
+    "KIND": "CHANGES",
+    "CHANGES_FROM_TS": "2026-01-31 12:00:00",
+    "SNAPSHOT_TS": "2026-02-01 09:00:00",
+}
+
+
+def test_change_set_reconciles_into_the_changes_folder(monkeypatch):
+    holder = _keep_cursor(monkeypatch)
+    for key, value in CHANGE_ITEM.items():
+        monkeypatch.setitem(ITEM, key, value)
+    monkeypatch.setattr(FakeCursor, "balance", (1000, 1002, 17, 15))
+    out, written = run(monkeypatch, FILE, 50)
+    assert out["state"] == "RECONCILED"
+    key = next(k for k in written if k.endswith("manifest.json"))
+    assert key == (
+        "internal/_changes/TRAVEL/WEB/CLICK_EVENTS/"
+        "chunk=changes_20260131T120000_20260201T090000/run_id=r1/manifest.json"
+    )
+    manifest = manifest_of(written)
+    assert manifest["changes_from_ts"] == "2026-01-31 12:00:00"
+    assert manifest["snapshot_ts"] == "2026-02-01 09:00:00"
+    assert manifest["chunks_in_table"] is None
+    sql = holder["cur"].sql
+    assert not any(q.startswith("SELECT COUNT(*)") and "EXTRACT_WORK_ITEM" in q for q in sql)
+    assert any("ROWS_FROM" in q for q in sql)
+    source_reads = [q for q in sql if "CLICK_EVENTS" in q and "FROM @" not in q]
+    assert all("CHANGES(INFORMATION => DEFAULT)" in q for q in source_reads)
+
+
+def test_change_set_that_does_not_balance_fails(monkeypatch):
+    for key, value in CHANGE_ITEM.items():
+        monkeypatch.setitem(ITEM, key, value)
+    monkeypatch.setattr(FakeCursor, "balance", (1000, 1002, 17, 16))
+    out, written = run(monkeypatch, FILE, 50)
+    assert out["state"] == "FAILED" and "does not balance" in out["reason"]
+    assert not any(k.endswith("manifest.json") for k in written)
+
+
+def test_bulk_chunk_count_leaves_out_change_sets(monkeypatch):
+    holder = _keep_cursor(monkeypatch)
+    out, _ = run(monkeypatch, FILE, 50)
+    assert out["state"] == "RECONCILED"
+    count = next(
+        q for q in holder["cur"].sql if q.startswith("SELECT COUNT(*)") and "EXTRACT_WORK_ITEM" in q
+    )
+    assert "COALESCE(KIND, 'BULK') = 'BULK'" in count

@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS EXTRACT_WORK_ITEM (
     RUN_ID            STRING,
     QUERY_ID          STRING,
     SNAPSHOT_TS       TIMESTAMP_NTZ,                -- UTC instant every query reads at (time travel); NULL: read live
+    KIND              STRING        DEFAULT 'BULK', -- BULK | CHANGES (a change set from the delta pass)
+    CHANGES_FROM_TS   TIMESTAMP_NTZ,                -- CHANGES only: the set holds rows changed from here to SNAPSHOT_TS
     ROWS_UNLOADED     NUMBER(38,0),
     SOURCE_ROWS       NUMBER(38,0),
     FILE_COUNT        NUMBER,
@@ -78,9 +80,10 @@ CREATE OR REPLACE VIEW EXTRACT_PROGRESS AS
 SELECT
     LANE,
     ZONE,
+    COALESCE(KIND, 'BULK')            AS KIND,
     STATUS,
     COUNT(*)                          AS WORK_ITEMS,
     SUM(EST_BYTES) / POWER(1024, 4)   AS EST_TB,
     SUM(BYTES_UNLOADED) / POWER(1024, 4) AS UNLOADED_TB
 FROM EXTRACT_WORK_ITEM
-GROUP BY LANE, ZONE, STATUS;
+GROUP BY LANE, ZONE, COALESCE(KIND, 'BULK'), STATUS;

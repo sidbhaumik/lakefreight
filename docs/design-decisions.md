@@ -136,13 +136,26 @@ The loss is not silent. Reconciliation counts the values in each timestamp colum
 
 **Why.** Chunks of a large table are unloaded hours apart. Read live, a row updated in between can land in two chunks or in none, while each chunk still reconciles; and rows that change between a chunk's unload and its reconciliation make good chunks fail. Time travel gives every query for a table the same moment with no extra storage or setup, and one snapshot for the whole run keeps related tables consistent too. Clones remain the fallback when retention cannot cover the extract.
 
+## 18. The delta pass reads Snowflake's change tracking between two snapshots
+
+**Decision.** Once a table's bulk extract has reconciled, `python -m lakefreight.planning --changes` creates a change set: the rows that changed from the table's last snapshot to a new one, read with `CHANGES(INFORMATION => DEFAULT) AT(...) END(...)`. Each row carries `LF_ACTION` (`INSERT` or `DELETE`) and `LF_IS_UPDATE`; an update is a delete of the old row and an insert of the new one. Change sets go through the same handlers, detokenization and checks as chunks, under `<zone prefix>/_changes/`, and each pass starts where the last ended, so passes can repeat until cut-over. Applying them to the target is left to the engine.
+
+**Rejected.** Comparing the two snapshots on a key; streams; applying changes in lakefreight.
+
+**Why.** A real migration extracts at a snapshot and then catches up. Change tracking gives exactly the net changes between two instants, without a key and without scanning the table twice, and Snowflake refuses the query if tracking was off for any part of the range, so a gap cannot pass silently. The planner runs that check, and the retention check, before creating anything. Streams would add objects to manage and advance only when consumed; snapshots recorded in the work items make each pass reproducible.
+
+A complete change set balances: the table's rows at the first snapshot, plus inserts, minus deletes, equal its rows at the second. Reconciliation checks that as well as the row count and fingerprint, so a change set that missed rows fails. Snowflake's `HASH_AGG` is not additive, so the fingerprints cannot prove that applying the set reproduces the second snapshot; the live test proved that end to end instead.
+
+Change sets live outside the table's folder, so registering the table never picks them up. Registering a `_changes` folder gives a Delta or Iceberg change log, which `--update` extends with each pass, and which an engine can `MERGE` from.
+
 ## Known gaps
 
 lakefreight does one job: a bulk move of Snowflake tables to open files on S3, with proof that every row and value arrived. Each item below is in one of four groups: outside that job by choice, a limit of a platform lakefreight depends on, not built yet, or built but not yet run on live services.
 
 ### Out of scope by design
 
-- **Continuous replication or change data capture.** lakefreight moves each table as of one point in time. Keeping a target in sync afterwards is a different tool's job. The planned delta pass, under future work, covers only the rows that change between the snapshot and cut-over.
+- **Continuous replication or change data capture.** lakefreight moves each table as of one point in time, then catches up with delta passes until cut-over (decision 18). Keeping a target in sync after cut-over is a different tool's job.
+- **Applying change sets.** lakefreight extracts and verifies each change set, and can register them as a change log. Merging them into the target table is left to the engine, which needs the table's key to do it.
 - **Moving data through Python.** Snowflake writes every file, and Python only coordinates. Moving rows through a client would cap throughput at one process (decision 1).
 - **Reshaping data.** Tables leave with the same columns and values. The only conversions are the ones every engine needs to read the files: timestamps to UTC, `TIME` as text, semi-structured values as JSON text, and geography as WKT (decision 14). Remodelling belongs downstream.
 - **Loading into each engine's own storage.** lakefreight stops at Parquet files plus Delta or Iceberg metadata, which any engine can read in place. Copying them into managed tables is left to each engine. The migration guide shows how for Databricks, with `DEEP CLONE`.
@@ -152,11 +165,11 @@ lakefreight does one job: a bulk move of Snowflake tables to open files on S3, w
 
 - **Timestamps keep only milliseconds.** Snowflake writes every Parquet timestamp in milliseconds, whatever the column's precision. lakefreight counts the affected values and fails the chunk unless `allow_timestamp_precision_loss` is set (decision 14).
 - **Time-zone offsets are not kept.** Snowflake cannot unload `TIMESTAMP_LTZ` or `TIMESTAMP_TZ` to Parquet, so they leave as UTC instants. The instant is exact, but the original offset is lost.
-- **Time travel reaches back only as far as retention allows.** That is 1 day on Standard edition, and up to 90 on Enterprise. The planner refuses a pinned table whose retention is shorter than `snapshot_window_hours`. An extract that takes longer than retention allows can read from a zero-copy clone instead.
+- **Time travel reaches back only as far as retention allows.** That is 1 day on Standard edition, and up to 90 on Enterprise. The planner refuses a pinned table whose retention is shorter than `snapshot_window_hours`, and a change set whose first snapshot is older than retention allows. An extract that takes longer can read from a zero-copy clone instead, but then has no delta pass.
+- **Change tracking must already be on.** A delta pass needs `CHANGE_TRACKING = TRUE` on the table from before its bulk snapshot. Turning it on later cannot recover the changes in between; the planner refuses such tables, and they need extracting again.
 
 ### Future work
 
-- **A delta pass.** Each work item and manifest already records its snapshot. What's missing is a planner mode that extracts the rows changed since then, using Snowflake change tracking, and a registration step that applies them.
 - **Chunking on other keys.** A large table whose clustering key leads with neither a date nor an integer, such as a text code, runs as one `COPY`. Hash ranges on any column would split it, though the chunks would not prune.
 - **Splitting oversized ranges.** A single day or integer range more than twice the target size is flagged for review, not split. Hour ranges, or narrower integer ranges, would split it.
 - **Replication tracking and egress purge.** Terraform sets up cross-account replication, and registration already refuses a file whose size does not match its manifest. But nothing records when each chunk has fully replicated, and purging the egress buckets after hand-off is a manual step.

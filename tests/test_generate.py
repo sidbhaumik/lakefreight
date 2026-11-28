@@ -210,3 +210,23 @@ def test_offline_plan_can_pin_a_snapshot(tmp_path):
     assert sql.count("AT(TIMESTAMP => '2026-01-31 12:00:00 +00:00'::TIMESTAMP_TZ)") == 4
     profile = (tmp_path / by_table(summary, "CLICK_EVENTS")[0]["file"]).read_text()
     assert "AT(TIMESTAMP =>" in profile
+
+
+def test_changes_since_writes_one_change_set_per_table(tmp_path):
+    import pytest
+
+    tables = generate.read_metadata(METADATA)
+    summary = generate.generate(
+        tables,
+        {},
+        settings,
+        tmp_path,
+        snapshot="2026-02-01 09:00:00",
+        changes_from="2026-01-31 12:00:00",
+    )
+    assert len(summary) == len(tables)
+    assert {r["chunk_id"] for r in summary} == {"changes_20260131T120000_20260201T090000"}
+    sql = (tmp_path / summary[0]["file"]).read_text()
+    assert "CHANGES(INFORMATION => DEFAULT)" in sql and "ROWS_FROM" in sql
+    with pytest.raises(ValueError, match="needs --snapshot"):
+        generate.generate(tables, {}, settings, tmp_path, changes_from="2026-01-31 12:00:00")

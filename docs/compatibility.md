@@ -11,11 +11,11 @@ Within 1.x, these change only in ways that keep existing migrations working. A c
 | Interface | Stable | 1.x may |
 |---|---|---|
 | **Command line** | The `discover`, `plan`, `register` and `config` commands, their options, and exit codes: 0 for success, non-zero for failure | Add commands and options |
-| **Work-item planner** | `python -m lakefreight.planning`, with `PLANNER_ROLE` and `PLANNER_WAREHOUSE` | Add a command-line equivalent |
+| **Work-item planner** | `python -m lakefreight.planning`, its `--changes` option, and `PLANNER_ROLE` and `PLANNER_WAREHOUSE` | Add a command-line equivalent |
 | **Settings** | Every key in the built-in defaults, its meaning and its default, and the lookup order: `--config`, `$LAKEFREIGHT_CONFIG`, `./lakefreight.toml`, then the defaults | Add keys whose defaults keep today's behaviour |
 | **Input files** | Metadata CSV columns, and profile CSV columns (`bucket_start` or the older `month_start`, plus `row_count`) | Accept more optional columns |
-| **Control tables** | `EXTRACT_CONFIG`, `EXTRACT_COLUMN_CONFIG`, `EXTRACT_WORK_ITEM` and the `EXTRACT_PROGRESS` view: their columns and the values they hold, such as zones, lanes, strategies and statuses | Add nullable columns, or columns with defaults. Each release that does gives the `ALTER TABLE` statements under **Upgrading** in the changelog |
-| **Output layout** | `<prefix>/<database>/<schema>/<table>/chunk=<chunk id>/run_id=<run id>/`, with `manifest.json` in each run folder and `_schema.json` at the table root | |
+| **Control tables** | `EXTRACT_CONFIG`, `EXTRACT_COLUMN_CONFIG`, `EXTRACT_WORK_ITEM` and the `EXTRACT_PROGRESS` view: their columns and the values they hold, such as zones, lanes, strategies, statuses and work-item kinds | Add nullable columns, or columns with defaults. Each release that does gives the `ALTER TABLE` statements under **Upgrading** in the changelog |
+| **Output layout** | `<prefix>/<database>/<schema>/<table>/chunk=<chunk id>/run_id=<run id>/`, with `manifest.json` in each run folder and `_schema.json` at the table root. Change sets use the same layout under `<prefix>/_changes/`, with the columns `LF_ACTION` and `LF_IS_UPDATE` added | |
 | **Chunk IDs** | Their formats, and that planning the same data with the same settings gives the same IDs. `register --update` relies on this to match chunks | |
 | **Manifest and schema files** | `format_version` 1 and every field in it | Add fields. Readers ignore fields they don't know |
 | **Reconciliation** | A chunk that passes today keeps passing on the same data and settings | Add checks only behind a setting that is off by default |

@@ -232,3 +232,58 @@ def test_snapshot_setting(tmp_path):
     )
     with pytest.raises(ValueError, match="extract.snapshot"):
         load_settings(path)
+
+
+FROM_TS, TO_TS = "2026-01-31 12:00:00", "2026-02-01 09:00:00"
+CHANGES_REF = (
+    "CHANGES(INFORMATION => DEFAULT) "
+    "AT(TIMESTAMP => '2026-01-31 12:00:00 +00:00'::TIMESTAMP_TZ) "
+    "END(TIMESTAMP => '2026-02-01 09:00:00 +00:00'::TIMESTAMP_TZ)"
+)
+
+
+def test_change_set_reads_changes_between_two_snapshots():
+    t = table()
+    chunk = renderer.change_chunk_id(FROM_TS, TO_TS)
+    assert chunk == "changes_20260131T120000_20260201T090000"
+    sql = renderer.unload_sql(t, None, chunk, "r1", settings, TO_TS, changes_from=FROM_TS)
+    assert CHANGES_REF in sql
+    assert 't.METADATA$ACTION AS "LF_ACTION"' in sql
+    assert 't.METADATA$ISUPDATE AS "LF_IS_UPDATE"' in sql
+    assert f"/_changes/SALES/PUBLIC/ORDERS/chunk={chunk}/run_id=r1/" in sql
+    assert CHANGES_REF in renderer.source_count_sql(t, None, TO_TS, FROM_TS)
+
+
+def test_change_set_fingerprints_include_the_action_columns():
+    t = table()
+    chunk = renderer.change_chunk_id(FROM_TS, TO_TS)
+    source = renderer.source_values_sql(t, None, settings, TO_TS, FROM_TS)
+    staged = renderer.staged_values_sql(t, chunk, "r1", settings, changes=True)
+    assert "(t.METADATA$ACTION)::VARCHAR, (t.METADATA$ISUPDATE)::BOOLEAN)" in source
+    assert "($1['LF_ACTION'])::VARCHAR, ($1['LF_IS_UPDATE'])::BOOLEAN)" in staged
+    assert "/_changes/SALES/PUBLIC/ORDERS/" in staged
+
+
+def test_change_balance_counts_both_snapshots():
+    sql = renderer.change_balance_sql(table(), FROM_TS, TO_TS)
+    assert "AT(TIMESTAMP => '2026-01-31 12:00:00 +00:00'::TIMESTAMP_TZ)) AS ROWS_FROM" in sql
+    assert "AT(TIMESTAMP => '2026-02-01 09:00:00 +00:00'::TIMESTAMP_TZ)) AS ROWS_TO" in sql
+    assert "COUNT_IF(t.METADATA$ACTION = 'DELETE') AS DELETES" in sql and CHANGES_REF in sql
+
+
+def test_change_set_needs_both_snapshots_and_free_column_names():
+    with pytest.raises(ValueError, match="both snapshots"):
+        renderer.source_ref(table(), None, FROM_TS)
+    clash = table(columns=(ColumnSpec("ID", "NUMBER(38,0)"), ColumnSpec("LF_ACTION", "TEXT")))
+    with pytest.raises(ValueError, match="used by change sets"):
+        renderer.unload_sql(clash, None, "c", "r", settings, TO_TS, changes_from=FROM_TS)
+
+
+def test_change_set_must_balance():
+    ok, _ = evaluate(10, 10, None, 0, balance=(1000, 1002, 17, 15))
+    assert ok
+    ok, reason = evaluate(10, 10, None, 0, balance=(1000, 1002, 17, 16))
+    assert not ok and reason == (
+        "change set does not balance: 1000 rows at the first snapshot + 17 inserts "
+        "- 16 deletes != 1002 rows at the second"
+    )

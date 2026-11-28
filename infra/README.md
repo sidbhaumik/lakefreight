@@ -134,6 +134,8 @@ Start one execution per lane:
 aws stepfunctions start-execution --state-machine-arn "$(terraform output -raw state_machine_arn)" --input '{"lane": "SMALL"}'
 ```
 
+For tables still being written, run the planner again with `--changes` once their bulk extract has reconciled, then start the lanes again. Each run creates a change set per table, holding the rows changed since its last snapshot; repeat until cut-over. See "Catching up: the delta pass" in `docs/migration-guide.md`.
+
 Repeat with `LARGE` and `RESTRICTED`. Every item in the lane gets its attempt; the execution then fails with `LaneHadFailures` if any item did not reconcile. A rerun picks up only pending and failed work items. Track progress with the `EXTRACT_PROGRESS` view.
 
 ### 9. Optional: replicate to the receiving account

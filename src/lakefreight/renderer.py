@@ -7,6 +7,11 @@ Statements per work item:
   source_values_sql   fingerprint of the values as unloaded, and timestamp
                       values finer than a millisecond, from the source
   staged_values_sql   the same fingerprint, read back from the unloaded files
+  change_balance_sql  change sets only: rows at both snapshots, inserts and deletes
+
+A change set (the delta pass) reads the rows that changed between two snapshots
+through Snowflake's CHANGES clause, with two more columns: LF_ACTION (INSERT or
+DELETE) and LF_IS_UPDATE. It is written under <zone prefix>/_changes/.
 """
 
 from __future__ import annotations
@@ -109,19 +114,57 @@ def snapshot_literal(snapshot) -> str:
     return f"'{text.replace('T', ' ')} +00:00'::TIMESTAMP_TZ"
 
 
-def source_ref(table: TableSpec, snapshot=None) -> str:
-    """The source table, read as of the snapshot when there is one (time travel)."""
+CHANGES_FOLDER = "_changes"
+# Extra columns of a change set: (name in the files, source expression, type).
+CHANGE_COLUMNS = (
+    ("LF_ACTION", "t.METADATA$ACTION", "VARCHAR"),
+    ("LF_IS_UPDATE", "t.METADATA$ISUPDATE", "BOOLEAN"),
+)
+
+
+def source_ref(table: TableSpec, snapshot=None, changes_from=None) -> str:
+    """The source table, read as of the snapshot when there is one (time travel).
+    With changes_from, the rows that changed between changes_from and the snapshot."""
+    if changes_from is not None:
+        if snapshot is None:
+            raise ValueError("a change set needs both snapshots")
+        return (
+            f"{table.source_fqn} CHANGES(INFORMATION => DEFAULT) "
+            f"AT(TIMESTAMP => {snapshot_literal(changes_from)}) "
+            f"END(TIMESTAMP => {snapshot_literal(snapshot)})"
+        )
     if snapshot is None:
         return table.source_fqn
     return f"{table.source_fqn} AT(TIMESTAMP => {snapshot_literal(snapshot)})"
+
+
+def _compact(ts) -> str:
+    text = ts.strftime("%Y-%m-%d %H:%M:%S") if hasattr(ts, "strftime") else str(ts)
+    digits = re.sub(r"\D", "", text)[:14]
+    if len(digits) != 14:
+        raise ValueError(f"not a timestamp: {ts!r}")
+    return f"{digits[:8]}T{digits[8:]}"
+
+
+def change_chunk_id(changes_from, snapshot) -> str:
+    """Chunk ID of a change set, such as changes_20260131T120000_20260201T090000."""
+    return f"changes_{_compact(changes_from)}_{_compact(snapshot)}"
+
+
+def _check_change_columns(table: TableSpec) -> None:
+    clash = {name for name, _, _ in CHANGE_COLUMNS} & {c.name for c in table.columns}
+    if clash:
+        raise ValueError(f"{table.path} has columns named {sorted(clash)}, used by change sets")
 
 
 def _literal(text: str) -> str:
     return "'" + text.replace("\\", "\\\\").replace("'", "''") + "'"
 
 
-def unload_path(table: TableSpec, chunk_id: str, run_id: str) -> str:
+def unload_path(table: TableSpec, chunk_id: str, run_id: str, changes: bool = False) -> str:
     path = f"{table.path}/chunk={chunk_id}/run_id={run_id}"
+    if changes:
+        path = f"{CHANGES_FOLDER}/{path}"
     if not _SAFE_PATH.match(path):
         raise ValueError(f"unsafe characters in unload path: {path!r}")
     return path
@@ -151,6 +194,7 @@ def unload_sql(
     run_id: str,
     settings: Settings,
     snapshot=None,
+    changes_from=None,
 ) -> str:
     joins = _xref_joins(table)
     _check_zone(table, joins)
@@ -158,11 +202,14 @@ def unload_sql(
         select_expr(c, joins[c.name].alias if c.name in joins else None, settings.xref_clear_column)
         for c in table.columns
     ]
+    if changes_from is not None:
+        _check_change_columns(table)
+        exprs += [f"{expr} AS {quote_ident(name)}" for name, expr, _ in CHANGE_COLUMNS]
     return _env.get_template("copy_unload.sql.j2").render(
         stage=settings.zones[table.zone].stage,
-        unload_path=unload_path(table, chunk_id, run_id),
+        unload_path=unload_path(table, chunk_id, run_id, changes_from is not None),
         select_exprs=exprs,
-        source_fqn=source_ref(table, snapshot),
+        source_fqn=source_ref(table, snapshot, changes_from),
         xref_joins=list(joins.values()),
         xref_table=settings.xref_table,
         token_column=quote_ident(settings.xref_token_column),
@@ -171,13 +218,15 @@ def unload_sql(
     )
 
 
-def source_count_sql(table: TableSpec, predicate: str | None, snapshot=None) -> str:
-    sql = f"SELECT COUNT(*) FROM {source_ref(table, snapshot)} t"
+def source_count_sql(
+    table: TableSpec, predicate: str | None, snapshot=None, changes_from=None
+) -> str:
+    sql = f"SELECT COUNT(*) FROM {source_ref(table, snapshot, changes_from)} t"
     return f"{sql} WHERE {predicate}" if predicate else sql
 
 
 def source_values_sql(
-    table: TableSpec, predicate: str | None, settings: Settings, snapshot=None
+    table: TableSpec, predicate: str | None, settings: Settings, snapshot=None, changes_from=None
 ) -> str:
     """One row: VALUE_HASH over every column as unloaded, then for each timestamp
     column a count of values with digits finer than a millisecond (SUB_MS_1...).
@@ -194,6 +243,8 @@ def source_values_sql(
         )
         for c in table.columns
     ]
+    if changes_from is not None:
+        hashed += [f"({expr})::{kind}" for _, expr, kind in CHANGE_COLUMNS]
     checks = [
         f"COUNT_IF(t.{quote_ident(c.name)} <> DATE_TRUNC('MILLISECOND', t.{quote_ident(c.name)}))"
         f" AS SUB_MS_{i + 1}"
@@ -205,7 +256,7 @@ def source_values_sql(
         for j in joins.values()
     )
     select = ",\n  ".join([f"HASH_AGG({', '.join(hashed)}) AS VALUE_HASH", *checks])
-    sql = f"SELECT\n  {select}\nFROM {source_ref(table, snapshot)} t{join_sql}"
+    sql = f"SELECT\n  {select}\nFROM {source_ref(table, snapshot, changes_from)} t{join_sql}"
     return f"{sql}\nWHERE {predicate}" if predicate else sql
 
 
@@ -214,20 +265,24 @@ def timestamp_columns(table: TableSpec) -> list[str]:
     return [c.name for c in table.columns if _is_timestamp(c)]
 
 
-def staged_values_sql(table: TableSpec, chunk_id: str, run_id: str, settings: Settings) -> str:
+def staged_values_sql(
+    table: TableSpec, chunk_id: str, run_id: str, settings: Settings, changes: bool = False
+) -> str:
     """ROW_COUNT and VALUE_HASH read back from the files one unload attempt wrote."""
     joins = _xref_joins(table)
     hashed = [_fingerprint(c, f"$1[{_literal(c.name)}]", c.name in joins) for c in table.columns]
+    if changes:
+        hashed += [f"($1[{_literal(name)}])::{kind}" for name, _, kind in CHANGE_COLUMNS]
     stage = settings.zones[table.zone].stage
     return (
         f"SELECT COUNT(*) AS ROW_COUNT, HASH_AGG({', '.join(hashed)}) AS VALUE_HASH\n"
-        f"FROM @{stage}/{unload_path(table, chunk_id, run_id)}/\n"
+        f"FROM @{stage}/{unload_path(table, chunk_id, run_id, changes)}/\n"
         f"  (FILE_FORMAT => {_literal(settings.parquet_file_format)})"
     )
 
 
 def unmatched_sql(
-    table: TableSpec, predicate: str | None, settings: Settings, snapshot=None
+    table: TableSpec, predicate: str | None, settings: Settings, snapshot=None, changes_from=None
 ) -> str | None:
     """Count rows where any RESTRICTED token is non-null but missing from the xref."""
     joins = _xref_joins(table)
@@ -242,4 +297,18 @@ def unmatched_sql(
         f"(t.{j.column} IS NOT NULL AND {j.alias}.{token} IS NULL)" for j in joins.values()
     )
     where = f"({predicate}) AND ({misses})" if predicate else misses
-    return f"SELECT COUNT(*) FROM {source_ref(table, snapshot)} t\n{join_sql}\nWHERE {where}"
+    ref = source_ref(table, snapshot, changes_from)
+    return f"SELECT COUNT(*) FROM {ref} t\n{join_sql}\nWHERE {where}"
+
+
+def change_balance_sql(table: TableSpec, changes_from, snapshot) -> str:
+    """One row: ROWS_FROM and ROWS_TO, the table's row counts at both snapshots, and
+    the change set's INSERTS and DELETES. A complete change set balances:
+    ROWS_FROM + INSERTS - DELETES = ROWS_TO."""
+    return (
+        f"SELECT\n  (SELECT COUNT(*) FROM {source_ref(table, changes_from)}) AS ROWS_FROM,\n"
+        f"  (SELECT COUNT(*) FROM {source_ref(table, snapshot)}) AS ROWS_TO,\n"
+        "  COUNT_IF(t.METADATA$ACTION = 'INSERT') AS INSERTS,\n"
+        "  COUNT_IF(t.METADATA$ACTION = 'DELETE') AS DELETES\n"
+        f"FROM {source_ref(table, snapshot, changes_from)} t"
+    )

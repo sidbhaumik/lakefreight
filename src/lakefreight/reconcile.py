@@ -22,11 +22,14 @@ def evaluate(
     staged_rows: int | None = None,
     source_hash: int | None = None,
     staged_hash: int | None = None,
+    balance: tuple[int, int, int, int] | None = None,
 ) -> tuple[bool, str | None]:
     """A work item passes only if no rows were dropped or duplicated; for
     RESTRICTED, unmatched tokens are within the threshold; no timestamp loses
     digits unless that was accepted; and the values read back from the files
-    match the source, by fingerprint."""
+    match the source, by fingerprint. A change set must also balance: the
+    rows at its first snapshot, plus inserts, minus deletes, equal the rows at
+    its second (`balance` is ROWS_FROM, ROWS_TO, INSERTS, DELETES)."""
     if rows_unloaded != source_rows:
         return False, f"row count mismatch: unloaded {rows_unloaded}, source {source_rows}"
     if unmatched_tokens is not None and unmatched_tokens > unmatched_threshold:
@@ -51,6 +54,13 @@ def evaluate(
             "values differ between the source and the unloaded files "
             f"(fingerprint {source_hash} vs {staged_hash})"
         )
+    if balance is not None:
+        rows_from, rows_to, inserts, deletes = balance
+        if rows_from + inserts - deletes != rows_to:
+            return False, (
+                f"change set does not balance: {rows_from} rows at the first snapshot "
+                f"+ {inserts} inserts - {deletes} deletes != {rows_to} rows at the second"
+            )
     return True, None
 
 
@@ -65,6 +75,7 @@ def build_manifest(
     chunks_in_table: int | None = None,
     written_at: str | None = None,
     value_hash: int | None = None,
+    changes_from_ts: str | None = None,
 ) -> dict:
     """`files` entries are {"name", "size", "rows"}; names are relative to the
     manifest's own folder. `chunks_in_table` lets a reader check completeness."""
@@ -78,6 +89,9 @@ def build_manifest(
         "run_id": run_id,
         "predicate": predicate,
         "snapshot_ts": snapshot_ts,
+        # Change sets only: the first snapshot. The set holds the rows that changed
+        # from changes_from_ts to snapshot_ts, with LF_ACTION and LF_IS_UPDATE.
+        "changes_from_ts": changes_from_ts,
         "row_count": rows,
         "file_count": len(files),
         "bytes": sum(f["size"] for f in files),

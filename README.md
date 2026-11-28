@@ -27,6 +27,7 @@ Each stage of the pipeline has been run against a real Snowflake account, a real
 | Full pipeline on AWS: 102 resources from Terraform, Snowflake writing to S3 through Step Functions and Lambda | All 18 work items reconciled; each zone's files encrypted with its own KMS key |
 | Values, not just row counts, across 17 column types | Source and file fingerprints matched. Changing one email, swapping two names, or a bad unload with the right row count were all caught |
 | A 2-million-row table extracted while a second session kept writing to it | Pinned to one snapshot, every chunk reconciled exactly. The unpinned control run failed, as expected |
+| A 1-million-row table caught up to cut-over with three delta passes, while writes continued | The change sets applied to the bulk files matched Snowflake at the final snapshot exactly: 1,000,285 rows, none differing |
 | A 10-million-row table with no date column, and a month holding 80% of a table | Every row fell in exactly one chunk, and every chunk query pruned partitions |
 | Delta tables read in Databricks SQL, including time travel and file skipping | Identical row counts and values; a three-month filter read 3 of 12 files |
 | A deliberate failure: 3 tokens missing from the cross-reference | The lane failed, the chunk got no manifest, and registration refused the table until a retry fixed it |
@@ -46,6 +47,7 @@ The offline tests passed in every case below. Running against real services foun
 2. **Plan.** Each table becomes one `COPY INTO`, or one per chunk for large tables, routed to the `RESTRICTED`, `PII` or `INTERNAL` zone. Each zone has its own stage, bucket, KMS key and Snowflake role, so a routing mistake causes a permission error, not a leak.
 3. **Unload and reconcile.** Snowflake writes the Parquet; Python only coordinates, through Step Functions. A chunk gets a manifest only if its row count, its unmatched-token count and a fingerprint of every value all match the source.
 4. **Register.** `lakefreight register` writes Delta Lake or Iceberg metadata over the files, without copying them, including only chunks with a manifest. `--update` replaces re-extracted chunks in one commit.
+5. **Catch up.** For tables still being written, delta passes extract the rows changed since the last snapshot, as change sets that are checked like chunks, until cut-over.
 
 ## Engineering highlights
 
@@ -53,6 +55,7 @@ Each of these has a written decision record in [design decisions](https://github
 
 - **Reconciliation that compares values.** A `HASH_AGG` fingerprint of the source, computed with the same expressions and joins as the unload, must equal the fingerprint of the files read back through the stage. It models Snowflake's timestamp truncation exactly, so the two sides agree bit for bit. ([16](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#16-reconciliation-compares-values-not-just-counts))
 - **Consistent extracts from tables still being written.** Every query for a run, including retries, reads one Snowflake time-travel snapshot. The planner checks each table's retention first, and refuses tables that could expire mid-extract. ([17](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#17-tables-still-being-written-are-read-as-of-one-snapshot))
+- **A delta pass that proves itself.** Snowflake change tracking yields the net changes between two snapshots. Each change set must match its source by count and fingerprint, and must balance: the rows at the first snapshot, plus inserts, minus deletes, equal the rows at the second. The planner checks change tracking and retention for every table before creating anything. ([18](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#18-the-delta-pass-reads-snowflakes-change-tracking-between-two-snapshots))
 - **Sensitivity that fails closed.** Only an explicit "not sensitive" sends a table to the `INTERNAL` zone; a missing or unknown classification is treated as sensitive. Isolation is enforced by Snowflake and IAM privileges, not by the code taking the right branch. ([3](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#3-three-zones-enforced-by-privileges), [4](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#4-sensitivity-fails-closed))
 - **A chunk planner with no gaps.** Ranges of a date or integer key are packed to a target size: whole months where they fit, days where they don't. Open-ended first and last ranges and a NULL chunk cover every possible value. The chunk column comes from the clustering key, so every chunk prunes. ([5–7](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#5-chunks-are-packed-to-a-size-not-fixed-to-a-calendar-period))
 - **Open table formats without rewriting data.** Delta logs carry per-file column statistics from the Parquet footers so engines can skip files. Iceberg goes through pyiceberg. Registration refuses incomplete tables, schema drift and files still replicating. ([13](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#13-table-formats-are-registered-over-the-unloaded-files))
@@ -136,11 +139,11 @@ The [migration guide](https://github.com/sidbhaumik/lakefreight/blob/main/docs/m
 | **Verified readers** | Databricks SQL (Delta), delta-rs, pyiceberg, DuckDB | Iceberg in Databricks; Snowflake, Redshift and BigQuery reads |
 | **Orchestration** | AWS Step Functions, deployed with Terraform or OpenTofu | |
 
-Version 1.0 covers the Snowflake-to-S3 path end to end, and every stage has run on live services except cross-account replication. It has not yet run a production-scale migration. From 1.0, the command line, settings, control tables, output layout and manifests are stable: every 1.x release keeps a migration in progress working. [Compatibility](https://github.com/sidbhaumik/lakefreight/blob/main/docs/compatibility.md) says exactly what is covered.
+Version 1.1 covers the Snowflake-to-S3 path end to end, delta passes included, and every stage has run on live services except cross-account replication. It has not yet run a production-scale migration. From 1.0, the command line, settings, control tables, output layout and manifests are stable: every 1.x release keeps a migration in progress working. [Compatibility](https://github.com/sidbhaumik/lakefreight/blob/main/docs/compatibility.md) says exactly what is covered.
 
-- **Out of scope by design:** continuous replication. lakefreight moves each table as of one point in time; it is not a sync tool.
+- **Out of scope by design:** continuous replication. lakefreight moves each table as of one point in time and catches up to cut-over; it is not a sync tool.
 - **Platform limit:** Snowflake's Parquet unload keeps timestamps only to the millisecond. lakefreight detects the loss and fails the chunk, but cannot avoid it.
-- **Next to build:** a delta pass for rows that change after a table's snapshot, and tracking of cross-account replication.
+- **Next to build:** tracking of cross-account replication, and a lock so `register --update` can run concurrently.
 
 [Known gaps](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#known-gaps) has the full list, in those groups, and says what has been built but not yet run on live services.
 

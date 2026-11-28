@@ -21,7 +21,7 @@ from pathlib import Path
 
 from . import chunk_planner, renderer
 from .config import Settings, load_settings
-from .models import ColumnSpec, TableSpec, resolve_zone
+from .models import Chunk, ColumnSpec, TableSpec, resolve_zone
 
 REQUIRED = {
     "table_database",
@@ -216,18 +216,24 @@ def read_profiles(
     return profiles
 
 
-def _statements(meta: TableMeta, chunk, run_id: str, settings: Settings, snapshot=None) -> str:
+def _statements(
+    meta: TableMeta, chunk, run_id: str, settings: Settings, snapshot=None, changes_from=None
+) -> str:
     spec = meta.spec
+    changes = changes_from is not None
+    what = "change set" if changes else "chunk"
     parts = [
-        f"-- {spec.path} chunk {chunk.chunk_id} ({spec.zone})",
+        f"-- {spec.path} {what} {chunk.chunk_id} ({spec.zone})",
         "-- 1. Unload",
-        renderer.unload_sql(spec, chunk.predicate, chunk.chunk_id, run_id, settings, snapshot)
+        renderer.unload_sql(
+            spec, chunk.predicate, chunk.chunk_id, run_id, settings, snapshot, changes_from
+        )
         + ";",
         "-- 2. Source row count: must equal the rows unloaded",
-        renderer.source_count_sql(spec, chunk.predicate, snapshot) + ";",
+        renderer.source_count_sql(spec, chunk.predicate, snapshot, changes_from) + ";",
     ]
     step = 3
-    unmatched = renderer.unmatched_sql(spec, chunk.predicate, settings, snapshot)
+    unmatched = renderer.unmatched_sql(spec, chunk.predicate, settings, snapshot, changes_from)
     if unmatched:
         parts += [
             f"-- {step}. Tokens with no xref match: must be within the threshold",
@@ -244,11 +250,16 @@ def _statements(meta: TableMeta, chunk, run_id: str, settings: Settings, snapsho
     )
     parts += [
         f"-- {step}. Fingerprint of the values as unloaded.{note}",
-        renderer.source_values_sql(spec, chunk.predicate, settings, snapshot) + ";",
+        renderer.source_values_sql(spec, chunk.predicate, settings, snapshot, changes_from) + ";",
         f"-- {step + 1}. The same fingerprint, read back from the unloaded files. ROW_COUNT must "
         f"equal the rows unloaded, and VALUE_HASH the VALUE_HASH of step {step}.",
-        renderer.staged_values_sql(spec, chunk.chunk_id, run_id, settings) + ";",
+        renderer.staged_values_sql(spec, chunk.chunk_id, run_id, settings, changes) + ";",
     ]
+    if changes:
+        parts += [
+            f"-- {step + 2}. The change set must balance: ROWS_FROM + INSERTS - DELETES = ROWS_TO.",
+            renderer.change_balance_sql(spec, changes_from, snapshot) + ";",
+        ]
     return "\n\n".join(parts) + "\n"
 
 
@@ -259,11 +270,17 @@ def generate(
     out_dir: str | Path,
     run_id: str = "manual",
     snapshot: str | None = None,
+    changes_from: str | None = None,
 ) -> list[dict]:
     """Write the SQL files and return the summary rows. With a snapshot (a UTC
-    timestamp), every table is read as of that instant, through time travel."""
-    if snapshot is not None:
-        renderer.snapshot_literal(snapshot)  # refuse a malformed snapshot before writing
+    timestamp), every table is read as of that instant, through time travel.
+    With changes_from as well, each table gets one change set instead: the rows
+    that changed from changes_from to the snapshot."""
+    if changes_from is not None and snapshot is None:
+        raise ValueError("a change set needs --snapshot as well as --changes-since")
+    for ts in (snapshot, changes_from):
+        if ts is not None:
+            renderer.snapshot_literal(ts)  # refuse a malformed timestamp before writing
     out_dir = Path(out_dir)
     summary: list[dict] = []
     for meta in tables:
@@ -295,6 +312,16 @@ def generate(
             )
 
         try:
+            if changes_from is not None:
+                chunk_id = renderer.change_chunk_id(changes_from, snapshot)
+                target = out_dir / rel_dir / f"{chunk_id}.sql"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                change_set = Chunk(chunk_id=chunk_id, predicate=None)
+                target.write_text(
+                    _statements(meta, change_set, run_id, settings, snapshot, changes_from)
+                )
+                row(chunk_id, 0, "READY", rel_dir / f"{chunk_id}.sql")
+                continue
             if chunked and meta.chunk_column and key not in profiles:
                 target = out_dir / rel_dir / "profile.sql"
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -366,12 +393,22 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
         "--snapshot",
         help="read every table as of this UTC timestamp, e.g. '2026-01-31 12:00:00' (time travel)",
     )
+    parser.add_argument(
+        "--changes-since",
+        metavar="TIMESTAMP",
+        help="with --snapshot: one change set per table, holding the rows that changed from "
+        "this UTC timestamp to the snapshot (the delta pass)",
+    )
     args = parser.parse_args(argv)
+    if args.changes_since and not args.snapshot:
+        parser.error("--changes-since needs --snapshot")
 
     settings = load_settings(args.config)
     tables = read_metadata(args.metadata)
     profiles = read_profiles(args.profiles) if args.profiles else {}
-    summary = generate(tables, profiles, settings, args.out, args.run_id, args.snapshot)
+    summary = generate(
+        tables, profiles, settings, args.out, args.run_id, args.snapshot, args.changes_since
+    )
 
     by_status = Counter(r["status"] for r in summary)
     by_zone = Counter(r["zone"] for r in summary if r["status"] == "READY")

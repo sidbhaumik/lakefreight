@@ -4,6 +4,10 @@
     submit      render and start the COPY asynchronously
     poll        check the COPY's status
     reconcile   compare counts, write the manifest, mark the item
+
+A work item is a chunk of the bulk extract, or a change set from the delta pass
+(KIND = 'CHANGES'), which reads the rows that changed between CHANGES_FROM_TS
+and SNAPSHOT_TS.
     summarize   count how the run's items ended, so a lane with failures fails
 
 Environment: LAKEFREIGHT_CONFIG (optional), ITEMS_BUCKET, plus the Snowflake
@@ -85,7 +89,13 @@ def submit(event, _context=None):
     # sees the same data however much the live table changes.
     snapshot = item["SNAPSHOT_TS"]
     sql = renderer.unload_sql(
-        table, item["PREDICATE"], item["CHUNK_ID"], run_id, settings, snapshot
+        table,
+        item["PREDICATE"],
+        item["CHUNK_ID"],
+        run_id,
+        settings,
+        snapshot,
+        changes_from=item.get("CHANGES_FROM_TS"),
     )
     cur.execute_async(sql)
     query_id = cur.sfqid
@@ -158,26 +168,40 @@ def reconcile(event, _context=None):
         rows_unloaded = sum(f["rows"] for f in files)
 
         snapshot = item["SNAPSHOT_TS"]
-        cur.execute(renderer.source_count_sql(table, item["PREDICATE"], snapshot))
+        changes_from = item.get("CHANGES_FROM_TS")
+        changes = changes_from is not None
+        cur.execute(renderer.source_count_sql(table, item["PREDICATE"], snapshot, changes_from))
         source_rows = int(cur.fetchone()[0])
 
         unmatched = None
-        unmatched_sql = renderer.unmatched_sql(table, item["PREDICATE"], settings, snapshot)
+        unmatched_sql = renderer.unmatched_sql(
+            table, item["PREDICATE"], settings, snapshot, changes_from
+        )
         if unmatched_sql:
             cur.execute(unmatched_sql)
             unmatched = int(cur.fetchone()[0])
 
         # Values, not just counts: fingerprint the source as unloaded and the files
         # as written, and count timestamps that lose digits below a millisecond.
-        cur.execute(renderer.source_values_sql(table, item["PREDICATE"], settings, snapshot))
+        cur.execute(
+            renderer.source_values_sql(table, item["PREDICATE"], settings, snapshot, changes_from)
+        )
         source_values = cur.fetchone()
         source_hash = int(source_values[0] or 0)
         sub_ms = {
             col: int(n or 0)
             for col, n in zip(renderer.timestamp_columns(table), source_values[1:], strict=True)
         }
-        cur.execute(renderer.staged_values_sql(table, item["CHUNK_ID"], event["run_id"], settings))
+        cur.execute(
+            renderer.staged_values_sql(table, item["CHUNK_ID"], event["run_id"], settings, changes)
+        )
         staged_rows, staged_hash = cur.fetchone()
+
+        balance = None
+        if changes:
+            # A complete change set balances the table's counts at both snapshots.
+            cur.execute(renderer.change_balance_sql(table, changes_from, snapshot))
+            balance = tuple(int(n or 0) for n in cur.fetchone())
 
         ok, reason = rules.evaluate(
             rows_unloaded,
@@ -189,6 +213,7 @@ def reconcile(event, _context=None):
             staged_rows=int(staged_rows or 0),
             source_hash=source_hash,
             staged_hash=int(staged_hash or 0),
+            balance=balance,
         )
         counts = dict(
             ROWS_UNLOADED=rows_unloaded,
@@ -204,13 +229,19 @@ def reconcile(event, _context=None):
             return {**event, "state": "FAILED", "reason": reason}
 
         zone = settings.zones[table.zone]
-        base = f"{zone.prefix}/{table.path}"
-        cur.execute(
-            f"SELECT COUNT(*) FROM {settings.control_schema}.EXTRACT_WORK_ITEM "
-            "WHERE DATABASE_NAME = %s AND SCHEMA_NAME = %s AND TABLE_NAME = %s",
-            (item["DATABASE_NAME"], item["SCHEMA_NAME"], item["TABLE_NAME"]),
-        )
-        chunks_in_table = int(cur.fetchone()[0])
+        if changes:
+            # Each change set stands alone; its folder is not part of the table.
+            base = f"{zone.prefix}/{renderer.CHANGES_FOLDER}/{table.path}"
+            chunks_in_table = None
+        else:
+            base = f"{zone.prefix}/{table.path}"
+            cur.execute(
+                f"SELECT COUNT(*) FROM {settings.control_schema}.EXTRACT_WORK_ITEM "
+                "WHERE DATABASE_NAME = %s AND SCHEMA_NAME = %s AND TABLE_NAME = %s "
+                "AND COALESCE(KIND, 'BULK') = 'BULK'",
+                (item["DATABASE_NAME"], item["SCHEMA_NAME"], item["TABLE_NAME"]),
+            )
+            chunks_in_table = int(cur.fetchone()[0])
         manifest = rules.build_manifest(
             table,
             item["CHUNK_ID"],
@@ -221,6 +252,7 @@ def reconcile(event, _context=None):
             rows_unloaded,
             chunks_in_table=chunks_in_table,
             value_hash=source_hash,
+            changes_from_ts=str(changes_from) if changes else None,
         )
         s3 = _s3()
         # Encrypt lakefreight's own files with the zone's key, like the data files.

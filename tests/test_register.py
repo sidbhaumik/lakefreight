@@ -409,3 +409,47 @@ def test_cli_register_update(table_root, capsys):
     out = capsys.readouterr().out
     assert "(version 1): 0 chunk(s) added, 1 replaced" in out
     assert "replaced chunk: null" in out
+
+
+def write_change_set(root, chunk, inserts, deletes):
+    folder = root / f"chunk={chunk}" / "run_id=r"
+    folder.mkdir(parents=True)
+    ids = [Decimal(i) for i in [*inserts, *deletes]]
+    actions = ["INSERT"] * len(inserts) + ["DELETE"] * len(deletes)
+    table = pa.table(
+        {
+            "ID": pa.array(ids, pa.decimal128(38, 0)),
+            "LF_ACTION": actions,
+            "LF_IS_UPDATE": [False] * len(ids),
+        }
+    )
+    pq.write_table(table, folder / "data_0_0_0.snappy.parquet")
+    size = (folder / "data_0_0_0.snappy.parquet").stat().st_size
+    files = [{"name": "data_0_0_0.snappy.parquet", "size": size, "rows": len(ids)}]
+    manifest = build_manifest(
+        SPEC,
+        chunk,
+        "r",
+        None,
+        "2026-02-01 09:00:00",
+        files,
+        len(ids),
+        changes_from_ts="2026-01-31 12:00:00",
+    )
+    (folder / "manifest.json").write_text(json.dumps(manifest))
+
+
+def test_change_sets_register_as_a_change_log(tmp_path):
+    root = tmp_path / "internal" / "_changes" / "TRAVEL" / "BOOKINGS" / "RESERVATION"
+    write_change_set(root, "changes_20260131T120000_20260201T090000", [1, 2], [7])
+    register_delta(str(root))
+    write_change_set(root, "changes_20260201T090000_20260202T090000", [3], [1])
+    update_delta(str(root))
+    log = deltalake.DeltaTable(str(root)).to_pyarrow_dataset().to_table().to_pydict()
+    assert sorted(zip(log["ID"], log["LF_ACTION"], strict=True)) == [
+        (Decimal(1), "DELETE"),
+        (Decimal(1), "INSERT"),
+        (Decimal(2), "INSERT"),
+        (Decimal(3), "INSERT"),
+        (Decimal(7), "DELETE"),
+    ]

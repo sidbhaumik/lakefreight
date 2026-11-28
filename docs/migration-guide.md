@@ -29,7 +29,7 @@ You need:
 | Question | Why it matters |
 |---|---|
 | One-time migration or ongoing feed? | A one-time move needs no change tracking. An ongoing feed needs watermarks and a way to carry deletes. |
-| Do source tables change during the migration? | If yes, extract from a snapshot and plan a delta pass. |
+| Do source tables change during the migration? | If yes, turn on change tracking, extract from a snapshot, and catch up with delta passes until cut-over. |
 | Who owns the target bucket, and in which region? | Another account means cross-account permissions and key policies. Another region means transfer cost and a rate limit to plan for. |
 | What will read the files? | The reader decides which Parquet types are safe. |
 | Can sensitive data leave in clear form? | If tokenized columns must be detokenized, that path needs its own controls. |
@@ -185,8 +185,50 @@ If source tables are still being written, set `STILL_WRITTEN = TRUE` on them in 
 
 - `snapshot = "all"` pins every table, and `"none"` turns pinning off.
 - Time travel only reaches back as far as each table's retention: 1 day by default, up to 90 on Enterprise edition. The planner refuses a pinned table whose retention is shorter than `snapshot_window_hours` (12 by default), before it plans anything. Raise the table's `DATA_RETENTION_TIME_IN_DAYS` for the migration, lower the window, or extract from a zero-copy clone by setting `SOURCE_DATABASE`.
-- The snapshot is recorded in each work item and manifest. Rows changed after it are what a delta pass must pick up. lakefreight does not run the delta pass yet; see [known gaps](design-decisions.md#future-work).
+- The snapshot is recorded in each work item and manifest. Rows changed after it are what the delta pass picks up; see below.
 - With `lakefreight plan`, pass `--snapshot '2026-01-31 12:00:00'` (UTC) to pin the generated SQL.
+
+### Catching up: the delta pass
+
+A table still being written keeps changing after its snapshot. The delta pass extracts those changes, as many times as you need, until cut-over.
+
+**Before the bulk extract**, turn on change tracking for every table that will need a delta pass. It needs the table's owner role, and must be on from before the snapshot:
+
+```sql
+ALTER TABLE SALES.PUBLIC.ORDERS SET CHANGE_TRACKING = TRUE;
+```
+
+**After a table's bulk extract has reconciled**, create its change set and run the lanes again:
+
+```bash
+PLANNER_ROLE=... PLANNER_WAREHOUSE=... python -m lakefreight.planning --changes
+```
+
+The planner takes one new snapshot for every table in the run. Each change set holds the rows that changed from the table's last snapshot, its bulk snapshot the first time and the end of its last change set after that, to the new one. Tables that aren't ready are skipped with a note: the bulk extract hasn't finished, the table was read live or from a clone, or a change set is still running. Before creating anything, the planner checks every table's time travel and change tracking. If any table fails, it creates nothing and names the table and the fix.
+
+Each change set is a work item with `KIND = 'CHANGES'`. It goes through the same handlers, zones, detokenization and checks as a chunk, and it must also balance: the rows at the first snapshot, plus inserts, minus deletes, must equal the rows at the second. Its files land under `<zone prefix>/_changes/<database>/<schema>/<table>/chunk=changes_<from>_<to>/`, outside the table's folder, with the table's columns plus:
+
+| Column | Meaning |
+|---|---|
+| `LF_ACTION` | `INSERT` for a row present at the second snapshot, `DELETE` for one present at the first |
+| `LF_IS_UPDATE` | `TRUE` when the row is half of an update: the old row is a `DELETE`, the new one an `INSERT` |
+
+The changes are net. A row inserted and then deleted between the snapshots does not appear; a row inserted and then updated appears once, as an insert of its last version.
+
+Repeat the delta pass as often as you like; passes closer together hold fewer changes. For cut-over, stop writes to the source, run one last pass, and apply it.
+
+**Applying change sets** needs the table's unique key. Apply them in order of chunk ID, each in one transaction: delete the rows the set deletes, then insert the rows it inserts. With `pass` standing for one change set's rows:
+
+```sql
+DELETE FROM orders WHERE order_id IN (SELECT order_id FROM pass WHERE LF_ACTION = 'DELETE');
+
+INSERT INTO orders (order_id, customer_id, amount, status)
+SELECT order_id, customer_id, amount, status FROM pass WHERE LF_ACTION = 'INSERT';
+```
+
+To read the change sets from an engine, register the `_changes` folder as its own table, a change log: `lakefreight register --format delta --table-root .../_changes/DB/SCHEMA/TABLE` after the first pass, then `--update` after each one. As with any registered table, only files named in a manifest are included.
+
+With `lakefreight plan`, pass `--snapshot` and `--changes-since` (both UTC) to generate a change set's SQL for every table in the metadata.
 
 ## 9. Transfer to the target account
 
@@ -275,7 +317,7 @@ To register the files in place as an external table instead, the bucket must be 
 | Tokenized chunk | Unmatched tokens within threshold |
 | Project | One report row per table: source rows, extracted rows, files, bytes, status |
 
-Then purge the egress buckets, drop any clones, and hand over the snapshot times and per-chunk counts for the delta pass. Reset any retention you raised for time travel.
+Then purge the egress buckets, drop any clones, and hand over the final snapshot time and the per-chunk and per-change-set counts. Reset any retention you raised for time travel, and turn off change tracking you turned on for the migration.
 
 ## 12. Common mistakes
 
@@ -295,3 +337,4 @@ Then purge the egress buckets, drop any clones, and hand over the snapshot times
 | Building a table from every file in the folder | Files from failed attempts appear as duplicate rows | Registering only files named in a manifest |
 | Releasing files before reconciling | The receiver loads partial data | Writing the manifest last |
 | Extracting a table that is still written without a snapshot | Chunks come from different moments, and reconciliation fails or misses moved rows | Setting `STILL_WRITTEN` so every query reads as of one snapshot |
+| Turning on change tracking after the bulk snapshot | The changes in between cannot be read, so the table has no delta pass | Turning it on for every table still being written before planning |

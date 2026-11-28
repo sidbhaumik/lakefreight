@@ -60,6 +60,31 @@ A 100-row token cross-reference sat in a separate database.
 - Reads from Spark or Databricks, Snowflake external tables, Redshift and BigQuery.
 - Snowflake's own sensitive data classification. Classification results take hours to reach `ACCOUNT_USAGE`, so this run used column-name rules.
 
+# Delta pass under concurrent writes
+
+On 2026-11-27 three tables were built in the Snowflake trial and flagged `STILL_WRITTEN`:
+- `ORDERS`: 1 million rows, chunked by integer key, with a tokenized passport column, in the RESTRICTED zone.
+- `CUSTOMERS`: 5,000 rows, with a `VARIANT` column, in the PII zone.
+- `EVENTS`: 100 rows, with change tracking left off on purpose.
+
+The real planner and handlers then ran against internal stages. A second connection ran 62 updates, deletes and inserts across both tracked tables while the bulk extract and two delta passes ran, including updates that changed tokens. Then writes stopped, and a third pass caught up to cut-over.
+
+| Check | Result |
+|---|---|
+| Bulk extract | All 7 work items reconciled, as of one snapshot, while the writes ran |
+| Missing change tracking | The first `--changes` run refused, naming `EVENTS` with Snowflake's "Change tracking is not enabled or has been missing" error, and created no change sets. With `EVENTS` disabled, the run went ahead |
+| Change sets | All 6 reconciled: row counts, fingerprints including `LF_ACTION` and `LF_IS_UPDATE`, unmatched tokens, and the balance check. Each pass started where the last ended |
+| Applied end to end | In DuckDB, the 1,000,000 bulk rows of `ORDERS` with the three passes applied (2,395 change rows: 1,340 inserts and 1,055 deletes, including 950 updates, each a delete plus an insert) gave 1,000,285 rows. That matched Snowflake's table at the final snapshot exactly, with passports detokenized: no row differed either way. The bulk files alone differed on 1,055 rows. `CUSTOMERS` matched exactly too, at 5,006 rows |
+| Change log | The `ORDERS` change sets registered as a Delta table after two passes, and `--update` added the third |
+
+**Found before the run, while designing it:**
+
+- **Snowflake refuses a gap.** If change tracking was off for any part of the range where the table changed, the `CHANGES` query fails at compile time. Turned on after the start point with no changes in between, it succeeds. So the planner can test every table cheaply, with a `LIMIT 0` query, before creating anything.
+- **Changes are net.** A row inserted and then deleted between the two snapshots does not appear, and a row inserted and then updated appears once, as its final version.
+- **`HASH_AGG` is not additive**, so fingerprints cannot prove that the first snapshot plus a change set equals the second. The balance check covers the counts, and this run covered the values end to end.
+
+No bugs. The test databases were dropped afterwards.
+
 # Snapshots under concurrent writes
 
 On 2026-11-27 a 2-million-row table, clustered on an integer key, was planned twice in the Snowflake trial: once flagged `STILL_WRITTEN` with `snapshot = "still_written"`, and once with `snapshot = "none"` as a control. Each plan was extracted through the real `submit`, `poll` and `reconcile` handlers while a second connection kept updating, deleting and inserting rows across the whole key range, pausing 3 seconds between each unload and its reconciliation.
