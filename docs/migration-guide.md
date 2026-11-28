@@ -81,6 +81,8 @@ Restricted flags come only from your tags and patterns, because only you know wh
 
 `ACCOUNT_USAGE` lags changes by up to a few hours, and reading it needs access to the `SNOWFLAKE` database. Run `lakefreight discover --sql-only` to get the query and run it yourself, then export the result as CSV.
 
+**Optional: the Claude Code skill.** If your metadata comes from somewhere else, such as a data catalog export with its own column names and units, the skill in `.claude/skills/generate-extract-sql` can turn it into lakefreight's format, run `lakefreight plan`, and list what needs a decision. This is the only step where AI is used. The SQL still comes from the generator, and every later step in this guide is plain data engineering. See "Where AI is used" in the README.
+
 To track the plan in Snowflake as well, run `sql/ddl/01_control_tables.sql`, adapt and run `sql/ddl/02_seed_config.sql`. Then answer these:
 
 - How is volume distributed? Usually a small number of tables holds most of the bytes. Those are your schedule.

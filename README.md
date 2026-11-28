@@ -49,6 +49,22 @@ The offline tests passed in every case below. Running against real services foun
 4. **Register.** `lakefreight register` writes Delta Lake or Iceberg metadata over the files, without copying them, including only chunks with a manifest. `--update` replaces re-extracted chunks in one commit.
 5. **Catch up.** For tables still being written, delta passes extract the rows changed since the last snapshot, as change sets that are checked like chunks, until cut-over.
 
+## Where AI is used, and where it isn't
+
+AI helps a person turn a messy metadata export into a reviewed plan. Everything that reads or moves data is ordinary data engineering: deterministic code, the same SQL from the same input every time, and no model called at run time.
+
+| Step | What does it | AI |
+|---|---|---|
+| Find the tables, their sizes and sensitivity | `lakefreight discover`, reading Snowflake's metadata views and Snowflake's own sensitive-data classification | No. Classification is a Snowflake feature; lakefreight only reads its results |
+| Turn your own export into lakefreight's metadata format | The [Claude Code skill](https://github.com/sidbhaumik/lakefreight/blob/main/.claude/skills/generate-extract-sql/SKILL.md) maps headers, converts units and writes a normalized copy | **Yes**, optional |
+| Generate the extract SQL | `lakefreight plan`: templates and unit-tested rules for casting, zone routing, detokenization and chunking | No. The skill runs this command; it does not write SQL |
+| Review the plan | The skill summarizes the generator's notes, such as unknown flags, chunk columns to confirm and profiles to run. You make each decision | **Yes**, optional, as a summary |
+| Deploy the infrastructure | Terraform or OpenTofu | No |
+| Create work items, unload to S3, reconcile | The planner, Step Functions and Lambda; Snowflake's `COPY INTO` writes the files | No |
+| Transfer, register as Delta or Iceberg, delta passes, apply changes | S3 replication, `lakefreight register`, the planner, your target engine | No |
+
+The skill sees metadata, never row values: table and column names, types, sizes, sensitivity flags, and the generator's output. It runs in Claude Code, under your permission settings and with your own environment. Without it, run `lakefreight plan` yourself and read `work_items.csv`: the SQL is identical. [Design decision 20](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md#20-ai-prepares-the-inputs-deterministic-code-writes-the-sql-and-moves-the-data) explains why.
+
 ## Engineering highlights
 
 Each of these has a written decision record in [design decisions](https://github.com/sidbhaumik/lakefreight/blob/main/docs/design-decisions.md), with the alternatives that were rejected.
@@ -159,7 +175,7 @@ Version 1.1 covers the Snowflake-to-S3 path end to end, delta passes included, a
 | [Infrastructure](https://github.com/sidbhaumik/lakefreight/blob/main/infra/README.md) | You want to deploy the pipeline with Terraform |
 | [Changelog](https://github.com/sidbhaumik/lakefreight/blob/main/CHANGELOG.md) | You want to see what changed in each release |
 
-The repo also includes a [Claude Code skill](https://github.com/sidbhaumik/lakefreight/blob/main/.claude/skills/generate-extract-sql/SKILL.md). Open the repo in Claude Code and ask it to "generate extract SQL for the tables in my_metadata.csv". Claude cleans up the file, runs the generator, and reports which tables need a decision.
+To use the [Claude Code skill](https://github.com/sidbhaumik/lakefreight/blob/main/.claude/skills/generate-extract-sql/SKILL.md), open the repo in Claude Code and ask it to "generate extract SQL for the tables in my_metadata.csv". Claude cleans up the file, runs the generator, and reports which tables need a decision. See [where AI is used](#where-ai-is-used-and-where-it-isnt).
 
 ## Repository layout
 

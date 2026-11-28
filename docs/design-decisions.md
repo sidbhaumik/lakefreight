@@ -156,6 +156,18 @@ Change sets live outside the table's folder, so registering the table never pick
 
 **Why.** Lanes reconcile chunks of the same table independently, so updates naturally overlap. The Delta protocol only needs each version to be created once, and S3 has offered put-if-absent since 2024, so no lock service or stale-lock cleanup is needed. Re-planning from the new version, instead of replaying the old plan, means a losing writer never removes files the winner already swapped, and commits nothing if the winner covered its chunks. Reading the table before the manifests matters: every manifest that a commit in the snapshot was planned from is then in the listing, so a slow writer cannot put a chunk back to an older run.
 
+## 20. AI prepares the inputs; deterministic code writes the SQL and moves the data
+
+**Decision.** AI appears in one place: an optional Claude Code skill that turns a user's metadata export into lakefreight's format, runs `lakefreight plan`, and summarizes what needs a decision. The SQL comes from the generator's templates and rules, never from the model. Discovery, infrastructure, unloads, reconciliation, transfer, registration and delta passes are plain code with no model calls.
+
+**Rejected.** Having a model write each table's SQL; calling a model at run time, for example to choose chunk columns or route tables.
+
+**Why.**
+- **Same input, same SQL:** with thousands of tables, each statement must follow from the metadata, so it can be reviewed, tested and regenerated. Model output can vary between runs, and an error in one table's SQL would be hard to spot among thousands.
+- **Rules that are tested and that fail closed:** routing and detokenization are security rules, and they live in unit-tested code.
+- **No model near the data:** the model sees metadata only, never row values, and the pipeline that moves data has no model in it to fail, drift or leak.
+- **The work AI is good at:** what's left for AI is the part that varies: messy exports, unfamiliar header names, and turning the generator's notes into a clear list of decisions for a person.
+
 ## Known gaps
 
 lakefreight does one job: a bulk move of Snowflake tables to open files on S3, with proof that every row and value arrived. Each item below is in one of four groups: outside that job by choice, a limit of a platform lakefreight depends on, not built yet, or built but not yet run on live services.

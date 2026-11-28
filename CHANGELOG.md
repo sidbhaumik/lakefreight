@@ -4,6 +4,11 @@ All notable changes to lakefreight are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+### Changed
+
+- The documentation says where AI is used and where it isn't. The only AI is an optional Claude Code skill that shapes a metadata export, runs `lakefreight plan` and summarizes what needs a decision. The SQL always comes from the generator, and every step that reads or moves data is plain code with no model calls (design decision 20).
+- The Claude Code skill is brought up to date with integer-key chunking, day profiles, fingerprint queries and change sets, and is told never to write or edit generated SQL.
+
 ## [1.2.0] - 2026-11-27
 
 Parallel updates: `register --update` can run on the same table from many writers at once.
