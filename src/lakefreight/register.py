@@ -11,6 +11,12 @@ With --update, an existing table is brought up to date instead: chunks that were
 re-extracted, or that arrived after an --allow-partial registration, replace or
 join the table in one new commit. Unchanged chunks are left alone.
 
+Updates of the same table can run at the same time. Each Delta commit is created
+only if its version does not exist yet (a conditional put on S3, a hard link on
+local disk); a writer that loses re-reads the table and its manifests, plans
+again and retries. Iceberg commits go through the catalog, and are retried the
+same way when the catalog reports a conflict.
+
 Needs the optional extras: `pip install "lakefreight[delta]"` or `"lakefreight[iceberg]"`.
 """
 
@@ -19,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import posixpath
+import random
 import sys
 import time
 import uuid
@@ -33,6 +40,19 @@ DELTA_LOG = "_delta_log"
 
 class RegistrationError(Exception):
     """The table cannot be registered safely; the message says why."""
+
+
+class ConcurrentCommit(RegistrationError):
+    """Another writer committed to the table first."""
+
+
+# How many times an update re-plans after losing a commit to another writer.
+MAX_COMMIT_ATTEMPTS = 10
+
+
+def _backoff(attempt: int) -> None:
+    if attempt:
+        time.sleep(random.uniform(0, min(0.1 * 2**attempt, 3.0)))
 
 
 @dataclass(frozen=True)
@@ -66,6 +86,7 @@ class Update:
     removed_files: int
     added_files: int
     version: int | None = None  # Delta log version written
+    attempts: int = 1  # commits tried; more than one means other writers won first
 
     @property
     def changed(self) -> bool:
@@ -414,6 +435,10 @@ def delta_update_commit(
     return "\n".join(json.dumps(a) for a in actions) + "\n"
 
 
+def _log_path(root: str, version: int) -> str:
+    return posixpath.join(root, DELTA_LOG, f"{version:020d}.json")
+
+
 def register_delta(table_root: str, allow_partial: bool = False) -> Collected:
     fs, root = open_root(table_root)
     pafs, _ = _pa()
@@ -423,26 +448,80 @@ def register_delta(table_root: str, allow_partial: bool = False) -> Collected:
             f"{log_dir} already exists; this table is already registered "
             "(pass --update to bring it up to date)"
         )
+    return _register_delta(fs, root, allow_partial)
+
+
+def _register_delta(fs, root: str, allow_partial: bool) -> Collected:
+    """Write version 0. Raises ConcurrentCommit if another writer wrote it first."""
     collected = collect(fs, root, allow_partial)
     schema = common_schema(fs, root, collected.files)
     files = [replace(f, stats=file_stats(fs, root, f, schema)) for f in collected.files]
     commit = delta_commit(schema, files)
-    fs.create_dir(log_dir, recursive=True)
-    _write_new(fs, posixpath.join(log_dir, f"{0:020d}.json"), commit)
+    fs.create_dir(posixpath.join(root, DELTA_LOG), recursive=True)
+    if not put_if_absent(fs, _log_path(root, 0), commit.encode()):
+        raise ConcurrentCommit(
+            f"another writer registered {root} first (pass --update to bring it up to date)"
+        )
     return collected
 
 
-def _write_new(fs, path: str, text: str) -> None:
-    """Write a log file that must not exist yet.
+def put_if_absent(fs, path: str, data: bytes) -> bool:
+    """Create `path` holding `data` only if it does not exist yet, atomically.
 
-    Object stores give no put-if-absent here, so this narrows the race but does not
-    close it: run one registration per table at a time.
+    Returns False, writing nothing, if it exists. This is what makes concurrent
+    Delta commits safe: two writers can never both create the same log version.
     """
     pafs, _ = _pa()
+    if isinstance(fs, pafs.LocalFileSystem):
+        import os
+        import tempfile
+
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".lakefreight-")
+        try:
+            with os.fdopen(fd, "wb") as out:
+                out.write(data)
+                out.flush()
+                os.fsync(out.fileno())
+            try:
+                os.link(tmp, path)  # fails if the path exists, and is never half written
+            except FileExistsError:
+                return False
+            return True
+        finally:
+            os.unlink(tmp)
+    if isinstance(fs, pafs.S3FileSystem):
+        bucket, _, key = path.partition("/")
+        return _s3_put_if_absent(fs.region, bucket, key, data)
+    # No atomic create on other filesystems: this narrows the race but cannot close it.
     if fs.get_file_info(path).type != pafs.FileType.NotFound:
-        raise RegistrationError(f"{path} already exists; another writer committed to this table")
+        return False
     with fs.open_output_stream(path) as out:
-        out.write(text.encode())
+        out.write(data)
+    return True
+
+
+def _s3_client(region: str | None):
+    try:
+        import boto3
+    except ImportError as exc:  # pragma: no cover - depends on extras
+        raise RegistrationError(
+            'boto3 is required to commit to a table on S3: pip install "lakefreight[delta]"'
+        ) from exc
+    return boto3.client("s3", region_name=region or None)
+
+
+def _s3_put_if_absent(region: str | None, bucket: str, key: str, data: bytes) -> bool:
+    """A conditional PutObject (If-None-Match: *), which S3 refuses if the key exists."""
+    from botocore.exceptions import ClientError
+
+    try:
+        _s3_client(region).put_object(Bucket=bucket, Key=key, Body=data, IfNoneMatch="*")
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code")
+        if code in ("PreconditionFailed", "ConditionalRequestConflict"):
+            return False
+        raise
+    return True
 
 
 def update_delta(table_root: str, allow_partial: bool = False) -> Update:
@@ -459,38 +538,50 @@ def update_delta(table_root: str, allow_partial: bool = False) -> Update:
 
     fs, root = open_root(table_root)
     pafs, _ = _pa()
-    log_dir = posixpath.join(root, DELTA_LOG)
-    if fs.get_file_info(log_dir).type == pafs.FileType.NotFound:
-        collected = register_delta(table_root, allow_partial)
-        return Update(collected, collected.chunks, [], 0, len(collected.files), version=0)
+    for attempt in range(MAX_COMMIT_ATTEMPTS):
+        _backoff(attempt)
+        if fs.get_file_info(_log_path(root, 0)).type == pafs.FileType.NotFound:
+            try:
+                collected = _register_delta(fs, root, allow_partial)
+            except ConcurrentCommit:
+                continue
+            return Update(collected, collected.chunks, [], 0, len(collected.files), 0, attempt + 1)
 
-    collected = collect(fs, root, allow_partial)
-    schema = common_schema(fs, root, collected.files)
-    table = DeltaTable(table_root if "://" in table_root else root)
-    features = set(table.protocol().reader_features or [])
-    if features - {"timestampNtz"}:
-        raise RegistrationError(
-            f"the table uses Delta features lakefreight does not write: {sorted(features)}; "
-            "another writer has changed it"
-        )
-    if json.loads(table.schema().to_json()) != json.loads(Schema.from_arrow(schema).to_json()):
-        raise RegistrationError(
-            "the newest runs have a different schema from the registered table; "
-            "register them as a new table"
-        )
-    actions = pa.table(table.get_add_actions(flatten=False)).to_pydict()
-    sizes = {
-        unquote(p): int(n) for p, n in zip(actions["path"], actions["size_bytes"], strict=True)
-    }
-    to_add, to_remove, added, replaced = plan_update(collected, set(sizes))
-    result = Update(collected, added, replaced, len(to_remove), len(to_add))
-    if not result.changed:
-        return result
-    files = [replace(f, stats=file_stats(fs, root, f, schema)) for f in to_add]
-    result.version = table.version() + 1
-    commit = delta_update_commit(files, {p: sizes[p] for p in to_remove}, added, replaced)
-    _write_new(fs, posixpath.join(log_dir, f"{result.version:020d}.json"), commit)
-    return result
+        # Read the table before the manifests: every manifest a commit in this
+        # snapshot was planned from is then in the listing, so a slower writer
+        # can never swap a chunk back to an older run.
+        table = DeltaTable(table_root if "://" in table_root else root)
+        collected = collect(fs, root, allow_partial)
+        schema = common_schema(fs, root, collected.files)
+        features = set(table.protocol().reader_features or [])
+        if features - {"timestampNtz"}:
+            raise RegistrationError(
+                f"the table uses Delta features lakefreight does not write: {sorted(features)}; "
+                "another writer has changed it"
+            )
+        if json.loads(table.schema().to_json()) != json.loads(Schema.from_arrow(schema).to_json()):
+            raise RegistrationError(
+                "the newest runs have a different schema from the registered table; "
+                "register them as a new table"
+            )
+        actions = pa.table(table.get_add_actions(flatten=False)).to_pydict()
+        sizes = {
+            unquote(p): int(n) for p, n in zip(actions["path"], actions["size_bytes"], strict=True)
+        }
+        to_add, to_remove, added, replaced = plan_update(collected, set(sizes))
+        result = Update(collected, added, replaced, len(to_remove), len(to_add))
+        result.attempts = attempt + 1
+        if not result.changed:
+            return result
+        files = [replace(f, stats=file_stats(fs, root, f, schema)) for f in to_add]
+        version = table.version() + 1
+        commit = delta_update_commit(files, {p: sizes[p] for p in to_remove}, added, replaced)
+        if put_if_absent(fs, _log_path(root, version), commit.encode()):
+            result.version = version
+            return result
+    raise ConcurrentCommit(
+        f"gave up after {MAX_COMMIT_ATTEMPTS} attempts: other writers kept committing to {root}"
+    )
 
 
 # --- Apache Iceberg -----------------------------------------------------------
@@ -525,8 +616,15 @@ def register_iceberg(
     namespace = identifier.rsplit(".", 1)[0] if "." in identifier else None
     if namespace:
         catalog.create_namespace_if_not_exists(namespace)
-    table = catalog.create_table(identifier, schema=schema, location=base)
-    table.add_files([posixpath.join(base, f.path) for f in collected.files])
+    from pyiceberg.exceptions import TableAlreadyExistsError
+
+    # The table and its files arrive in one commit, so no reader or concurrent
+    # update ever sees the table empty.
+    try:
+        with catalog.create_table_transaction(identifier, schema=schema, location=base) as tx:
+            tx.add_files([posixpath.join(base, f.path) for f in collected.files])
+    except TableAlreadyExistsError as exc:
+        raise ConcurrentCommit(f"another writer created Iceberg table {identifier} first") from exc
     return collected
 
 
@@ -550,49 +648,68 @@ def update_iceberg(
             'pyiceberg is required: pip install "lakefreight[iceberg]"'
         ) from exc
 
-    catalog = load_catalog(catalog_name, **(catalog_properties or {}))
-    if not catalog.table_exists(identifier):
-        collected = register_iceberg(
-            table_root, catalog_name, identifier, catalog_properties, allow_partial
-        )
-        return Update(collected, collected.chunks, [], 0, len(collected.files))
+    from pyiceberg.exceptions import CommitFailedException, ValidationException
 
+    catalog = load_catalog(catalog_name, **(catalog_properties or {}))
     fs, root = open_root(table_root)
-    collected = collect(fs, root, allow_partial)
-    common_schema(fs, root, collected.files)
     base = table_root.rstrip("/") if "://" in table_root else root
-    table = catalog.load_table(identifier)
-    current = {}
-    for task in table.scan().plan_files():
-        if task.delete_files:
-            raise RegistrationError(
-                f"{task.file.file_path} has row-level deletes; another writer has changed "
-                "the table, so lakefreight will not update it"
-            )
-        path = task.file.file_path
-        rel = path[len(base) + 1 :] if path.startswith(base + "/") else path
-        current[rel] = task.file
-    to_add, to_remove, added, replaced = plan_update(collected, set(current))
-    result = Update(collected, added, replaced, len(to_remove), len(to_add))
-    if not result.changed:
-        return result
-    props = {
-        "lakefreight.added-chunks": ",".join(added),
-        "lakefreight.replaced-chunks": ",".join(replaced),
-    }
-    try:
-        with table.transaction() as tx:
-            with tx.update_snapshot(snapshot_properties=props).overwrite() as overwrite:
-                for rel in sorted(to_remove):
-                    overwrite.delete_data_file(current[rel])
-                new_files = parquet_files_to_data_files(
-                    table.io, tx.table_metadata, iter(posixpath.join(base, f.path) for f in to_add)
+    for attempt in range(MAX_COMMIT_ATTEMPTS):
+        _backoff(attempt)
+        if not catalog.table_exists(identifier):
+            try:
+                collected = register_iceberg(
+                    table_root, catalog_name, identifier, catalog_properties, allow_partial
                 )
-                for data_file in new_files:
-                    overwrite.append_data_file(data_file)
-    except ValueError as exc:
-        raise RegistrationError(f"the newest runs do not fit the table: {exc}") from exc
-    return result
+            except ConcurrentCommit:
+                continue
+            return Update(
+                collected, collected.chunks, [], 0, len(collected.files), None, attempt + 1
+            )
+
+        # As for Delta: the table first, then the manifests.
+        table = catalog.load_table(identifier)
+        collected = collect(fs, root, allow_partial)
+        common_schema(fs, root, collected.files)
+        current = {}
+        for task in table.scan().plan_files():
+            if task.delete_files:
+                raise RegistrationError(
+                    f"{task.file.file_path} has row-level deletes; another writer has changed "
+                    "the table, so lakefreight will not update it"
+                )
+            path = task.file.file_path
+            rel = path[len(base) + 1 :] if path.startswith(base + "/") else path
+            current[rel] = task.file
+        to_add, to_remove, added, replaced = plan_update(collected, set(current))
+        result = Update(collected, added, replaced, len(to_remove), len(to_add))
+        result.attempts = attempt + 1
+        if not result.changed:
+            return result
+        props = {
+            "lakefreight.added-chunks": ",".join(added),
+            "lakefreight.replaced-chunks": ",".join(replaced),
+        }
+        try:
+            with table.transaction() as tx:
+                with tx.update_snapshot(snapshot_properties=props).overwrite() as overwrite:
+                    for rel in sorted(to_remove):
+                        overwrite.delete_data_file(current[rel])
+                    new_files = parquet_files_to_data_files(
+                        table.io,
+                        tx.table_metadata,
+                        iter(posixpath.join(base, f.path) for f in to_add),
+                    )
+                    for data_file in new_files:
+                        overwrite.append_data_file(data_file)
+        except (CommitFailedException, ValidationException):
+            continue  # another writer committed first: plan again from its snapshot
+        except ValueError as exc:
+            raise RegistrationError(f"the newest runs do not fit the table: {exc}") from exc
+        return result
+    raise ConcurrentCommit(
+        f"gave up after {MAX_COMMIT_ATTEMPTS} attempts: other writers kept committing to "
+        f"{identifier}"
+    )
 
 
 # --- Command line -------------------------------------------------------------
@@ -655,6 +772,8 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
             )
             for chunk in result.replaced:
                 print(f"  replaced chunk: {chunk}")
+        if result.attempts > 1:
+            print(f"  other writers committed first; planned again {result.attempts - 1} time(s)")
     else:
         print(
             f"registered {args.format} table at {args.table_root}: "

@@ -453,3 +453,152 @@ def test_change_sets_register_as_a_change_log(tmp_path):
         (Decimal(3), "INSERT"),
         (Decimal(7), "DELETE"),
     ]
+
+
+# --- Concurrent updates ---------------------------------------------------------
+
+
+def rival_commits(table_root, update):
+    """Another writer re-extracts chunk 0001 and commits, having listed the manifests
+    before this writer's run of chunk null appeared."""
+    mine = table_root / "chunk=null" / "run_id=mine" / "manifest.json"
+    mine.rename(mine.with_suffix(".hidden"))
+    try:
+        write_run(
+            table_root,
+            "0001_202401_202406",
+            "rival",
+            4,
+            start=500,
+            written_at="2026-01-03T00:00:00+00:00",
+        )
+        result = update()
+        assert result.replaced == ["0001_202401_202406"]
+    finally:
+        mine.with_suffix(".hidden").rename(mine)
+
+
+def test_put_if_absent_never_overwrites(tmp_path):
+    from lakefreight.register import put_if_absent
+
+    fs, root = open_root(str(tmp_path))
+    path = f"{root}/00000000000000000000.json"
+    assert put_if_absent(fs, path, b"first")
+    assert not put_if_absent(fs, path, b"second")
+    assert (tmp_path / "00000000000000000000.json").read_bytes() == b"first"
+    assert [p.name for p in tmp_path.iterdir()] == ["00000000000000000000.json"]
+
+
+def test_s3_commit_is_a_conditional_put(monkeypatch):
+    import pyarrow.fs as pafs
+    from botocore.exceptions import ClientError
+
+    from lakefreight import register as reg
+
+    calls = []
+
+    class Client:
+        def put_object(self, **kw):
+            calls.append(kw)
+            code = {2: "PreconditionFailed", 3: "ConditionalRequestConflict", 4: "AccessDenied"}
+            if len(calls) in code:
+                raise ClientError({"Error": {"Code": code[len(calls)]}}, "PutObject")
+
+    regions = []
+    monkeypatch.setattr(reg, "_s3_client", lambda region: regions.append(region) or Client())
+    fs = pafs.S3FileSystem(region="us-east-2", anonymous=True)
+    key = "egress/internal/DB/S/T/_delta_log/00000000000000000001.json"
+    assert reg.put_if_absent(fs, f"my-bucket/{key}", b"commit")
+    assert calls[0] == {"Bucket": "my-bucket", "Key": key, "Body": b"commit", "IfNoneMatch": "*"}
+    assert regions == ["us-east-2"]
+    assert not reg.put_if_absent(fs, f"my-bucket/{key}", b"commit")  # the key exists
+    assert not reg.put_if_absent(fs, f"my-bucket/{key}", b"commit")  # a concurrent put
+    with pytest.raises(ClientError):
+        reg.put_if_absent(fs, f"my-bucket/{key}", b"commit")
+
+
+def test_delta_update_that_loses_a_race_plans_again(table_root, monkeypatch):
+    from lakefreight import register as reg
+
+    monkeypatch.setattr(reg, "_backoff", lambda attempt: None)
+    register_delta(str(table_root))
+    real = reg.put_if_absent
+
+    def racing(fs, path, data):
+        # Just before this commit lands, another writer commits version 1.
+        monkeypatch.setattr(reg, "put_if_absent", real)
+        rival_commits(table_root, lambda: update_delta(str(table_root)))
+        return real(fs, path, data)
+
+    monkeypatch.setattr(reg, "put_if_absent", racing)
+    write_run(table_root, "null", "mine", 2, start=700, written_at="2099-01-01T00:00:00+00:00")
+    result = update_delta(str(table_root))
+    assert (result.attempts, result.version, result.replaced) == (2, 2, ["null"])
+    # Both writers' chunks are in the table: the rival's run of 0001 was not undone.
+    assert delta_rows(table_root) == [500, 501, 502, 503, 700, 701]
+    assert log_versions(table_root) == [f"{v:020d}.json" for v in range(3)]
+
+
+def test_parallel_delta_updates_lose_nothing(tmp_path):
+    import random
+    import threading
+    import time
+
+    root = tmp_path / "t"
+    n = 8
+    write_run(root, "0000", "r", 2, chunks_in_table=n + 1)
+    register_delta(str(root), allow_partial=True)
+    barrier, results, errors = threading.Barrier(n), [], []
+
+    def worker(i):
+        barrier.wait()
+        time.sleep(random.uniform(0, 0.05))
+        write_run(root, f"{i + 1:04d}", "r", 2, chunks_in_table=n + 1, start=10 * (i + 1))
+        try:
+            results.append(update_delta(str(root), allow_partial=True))
+        except Exception as exc:  # noqa: BLE001 - reported below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors
+    expected = [0, 1] + [10 * (i + 1) + k for i in range(n) for k in range(2)]
+    assert delta_rows(root) == sorted(expected)
+    # Each chunk was added by exactly one commit, and the versions have no gaps.
+    assert sorted(c for r in results for c in r.added) == [f"{i + 1:04d}" for i in range(n)]
+    versions = log_versions(root)
+    assert versions == [f"{v:020d}.json" for v in range(len(versions))]
+    assert not [p for p in (root / "_delta_log").iterdir() if p.name.startswith(".lakefreight-")]
+
+
+def test_iceberg_update_that_loses_a_race_plans_again(table_root, tmp_path, monkeypatch):
+    pytest.importorskip("pyiceberg")
+    pytest.importorskip("sqlalchemy")
+    from pyiceberg.catalog import load_catalog
+    from pyiceberg.table import Transaction
+
+    from lakefreight import register as reg
+
+    monkeypatch.setattr(reg, "_backoff", lambda attempt: None)
+    props = {"type": "sql", "uri": f"sqlite:///{tmp_path}/catalog.db", "warehouse": str(tmp_path)}
+    update_iceberg(str(table_root), "local", "travel.reservation", props)
+    real = Transaction.commit_transaction
+
+    def racing(self):
+        monkeypatch.setattr(Transaction, "commit_transaction", real)
+        rival_commits(
+            table_root,
+            lambda: update_iceberg(str(table_root), "local", "travel.reservation", props),
+        )
+        return real(self)
+
+    monkeypatch.setattr(Transaction, "commit_transaction", racing)
+    write_run(table_root, "null", "mine", 2, start=700, written_at="2099-01-01T00:00:00+00:00")
+    result = update_iceberg(str(table_root), "local", "travel.reservation", props)
+    assert (result.attempts, result.replaced) == (2, ["null"])
+    table = load_catalog("local", **props).load_table("travel.reservation")
+    ids = sorted(int(v) for v in table.scan().to_arrow().column("ID").to_pylist())
+    assert ids == [500, 501, 502, 503, 700, 701]

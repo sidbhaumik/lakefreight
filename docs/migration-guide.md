@@ -286,7 +286,7 @@ An update refuses to run when:
 - the newest runs have a different schema from the registered table. Register them as a new table.
 - any of the checks above fails for the newest runs.
 
-Run one registration per table at a time. The Delta log is written without a lock, so two concurrent updates of the same table could overwrite each other's commit. Iceberg commits go through the catalog and are safe.
+Updates of the same table can run at the same time, for example one per lane as chunks reconcile. Each Delta commit is created only if its version does not exist yet: a conditional put on S3 (`If-None-Match: *`), a hard link on local disk. A writer that loses the race re-reads the table and the manifests, plans again from the new version and retries, up to 10 times. If the winner already added its chunks, the loser commits nothing. Iceberg commits go through the catalog and are retried the same way. On other filesystems the Delta commit cannot be made atomic, so run one update per table at a time there. Committing on S3 needs `boto3`, which the `delta` extra installs.
 
 Don't `VACUUM` a Delta table you still plan to update. Once the retention period passes, it deletes every file the log doesn't reference, including the manifests that `--update` relies on.
 

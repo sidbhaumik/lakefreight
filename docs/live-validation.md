@@ -60,6 +60,19 @@ A 100-row token cross-reference sat in a separate database.
 - Reads from Spark or Databricks, Snowflake external tables, Redshift and BigQuery.
 - Snowflake's own sensitive data classification. Classification results take hours to reach `ACCOUNT_USAGE`, so this run used column-name rules.
 
+# Parallel updates on S3
+
+On 2026-11-27, eight separate processes ran `lakefreight register --update` on the same Delta table in a new S3 bucket, all at once. Each first uploaded its own chunk, with the manifest last, starting from a table registered with one chunk of nine. The run was done twice: once with all eight starting within 0.3 seconds, and once spread over 3 seconds, on a fresh table.
+
+| Check | Result |
+|---|---|
+| Starting together | One writer committed version 1 with all eight chunks. The other seven lost the race on version 1, S3 refusing their conditional puts, then re-planned and found nothing left to commit |
+| Spread out | Three writers committed versions 1 to 3, and the other five lost 11 races between them, each followed by a new plan |
+| The table | Both times, delta-rs read exactly the 27 expected rows. Each chunk was added by exactly one commit, and the log versions had no gaps |
+| S3 itself | A conditional put of an existing log version was refused |
+
+No bugs. The bucket was deleted afterwards.
+
 # Delta pass under concurrent writes
 
 On 2026-11-27 three tables were built in the Snowflake trial and flagged `STILL_WRITTEN`:

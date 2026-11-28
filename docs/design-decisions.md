@@ -148,6 +148,14 @@ A complete change set balances: the table's rows at the first snapshot, plus ins
 
 Change sets live outside the table's folder, so registering the table never picks them up. Registering a `_changes` folder gives a Delta or Iceberg change log, which `--update` extends with each pass, and which an engine can `MERGE` from.
 
+## 19. Concurrent updates commit with a conditional put, and retry
+
+**Decision.** A Delta commit is created only if its log version does not exist yet: a conditional `PutObject` (`If-None-Match: *`) on S3, a hard link from a temporary file on local disk. A writer whose commit is refused re-reads the table, then the manifests, plans again and retries with backoff, up to 10 times. Iceberg updates retry the same way when the catalog reports a conflict, and a new Iceberg table is created together with its files in one transaction.
+
+**Rejected.** A lock table in DynamoDB; a lock file; one registration per table at a time.
+
+**Why.** Lanes reconcile chunks of the same table independently, so updates naturally overlap. The Delta protocol only needs each version to be created once, and S3 has offered put-if-absent since 2024, so no lock service or stale-lock cleanup is needed. Re-planning from the new version, instead of replaying the old plan, means a losing writer never removes files the winner already swapped, and commits nothing if the winner covered its chunks. Reading the table before the manifests matters: every manifest that a commit in the snapshot was planned from is then in the listing, so a slow writer cannot put a chunk back to an older run.
+
 ## Known gaps
 
 lakefreight does one job: a bulk move of Snowflake tables to open files on S3, with proof that every row and value arrived. Each item below is in one of four groups: outside that job by choice, a limit of a platform lakefreight depends on, not built yet, or built but not yet run on live services.
@@ -173,7 +181,6 @@ lakefreight does one job: a bulk move of Snowflake tables to open files on S3, w
 - **Chunking on other keys.** A large table whose clustering key leads with neither a date nor an integer, such as a text code, runs as one `COPY`. Hash ranges on any column would split it, though the chunks would not prune.
 - **Splitting oversized ranges.** A single day or integer range more than twice the target size is flagged for review, not split. Hour ranges, or narrower integer ranges, would split it.
 - **Replication tracking and egress purge.** Terraform sets up cross-account replication, and registration already refuses a file whose size does not match its manifest. But nothing records when each chunk has fully replicated, and purging the egress buckets after hand-off is a manual step.
-- **Safe concurrent updates.** `register --update` writes the Delta log without a lock, so run one registration per table at a time. S3 conditional writes would make concurrent registrations safe.
 - **Lossless sub-millisecond timestamps.** An opt-in for the columns that need it, such as an extra column of epoch nanoseconds. It is not the default, because every reader would have to convert the values back.
 - **One-step catalog registration.** Today tables are read by path, or copied in with `DEEP CLONE`. Registering them directly in Unity Catalog, AWS Glue or Snowflake's catalog would save that step.
 - **Other clouds and sources.** Google Cloud Storage and Azure Data Lake Storage as targets, and warehouses other than Snowflake as sources.
